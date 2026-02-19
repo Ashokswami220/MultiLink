@@ -1,0 +1,94 @@
+<resources>
+    <string name="app_name">MultiLink</string>
+    <string name="cd_open_drawer">Open Drawer</string>
+    <string name="cd_profile">Profile</string>
+    <string name="loc_not_sel_by_host">Location not selected by Host</string>
+
+    <string name="nav_home">Home</string>
+    <string name="nav_user">User</string>
+    <string name="nav_recent">Recent</string>
+    <string name="nav_settings">Settings</string>
+
+    <string name="home_header">Active Sessions</string>
+    <string name="home_subtitle">Track your friends and trips in real-time.</string>
+    <string name="home_empty_state">You have no sessions</string>
+    <string name="home_empty_state_subtitle">Create a link to start tracking</string>
+    <string name="cd_create_session_fab">Create Session</string>
+    <string name="cd_join_session_fab">Join Session</string>
+
+    <string name="dialog_title_new_session">New MultiLink</string>
+    <string name="cd_close_dialog">Close</string>
+    <string name="input_label_title">Session Title</string>
+    <string name="input_label_from">From Location</string>
+    <string name="input_placeholder_current_loc">Current Location</string>
+    <string name="input_label_to">To Destination</string>
+    <string name="input_placeholder_select_map">Select on Map</string>
+
+    <string name="toggle_hrs">Hrs</string>
+    <string name="toggle_days">Days</string>
+    <string name="label_duration">Duration</string>
+    <string name="label_max_participants">Max Participants</string>
+    <string name="label_participants">Participants</string>
+    <string name="cd_select_people_limit">Select people limit</string>
+
+    <string name="btn_create_link">Create Link</string>
+    <string name="error_enter_title">Enter Title</string>
+    <string name="btn_max_limit">Set Max Limit</string>
+
+    <string name="status_live">LIVE</string>
+    <string name="format_expires">Expires: %1$s %2$s</string>
+    <string name="format_joined">1/%1$s joined</string>
+    <string name="action_share">Share</string>
+    <string name="action_stop">Stop</string>
+
+    <string name="error_max_limit_reached">Max limit is %1$s</string>
+    <string name="label_max_limit_helper">Max: %1$s</string>
+
+    // See all screen
+    <string name="label_last_updated">Updated: %1$s</string>
+    <string name="cd_back_button">Go Back</string>
+    <string name="placeholder_name">Unknown User</string>
+    <string name="placeholder_number">No Contact Info</string>
+
+
+    // Detail Screen
+    <string name="action_call">Call</string>
+    <string name="action_message">Message</string>
+    <string name="action_navigate">Navigate</string>
+    <string name="label_address">Current Location</string>
+    <string name="label_status_online">Online</string>
+    <string name="label_status_offline">Offline</string>
+    <string name="label_battery_charging">%1$d%% • Charging</string>
+    <string name="label_battery_normal">%1$d%%</string>
+
+
+    // User Screen
+    <string name="header_profile">My Profile</string>
+    <string name="section_active_access">Who can see me</string>
+    <string name="label_online_status">You are visible</string>
+    <string name="label_ghost_mode">Ghost Mode</string>
+    <string name="desc_ghost_mode">Temporarily pause location for everyone</string>
+    <string name="btn_stop_sharing">Stop</string>
+    <string name="label_access_level">Precise Location</string>
+    <string name="label_access_time">Since %1$s</string>
+    <string name="msg_stop_sharing">Stopped sharing with %1$s</string>
+
+    // map and search
+    <string name="search_hint">Search location...</string>
+    <string name="header_results">Results</string>
+    <string name="cd_clear_text">Clear text</string>
+    <string name="cd_close_list">Close results list</string>
+    <string name="cd_confirm_location">Confirm location</string>
+    <string name="cd_my_location">My Location</string>
+    <string name="text_current_location">Current Location</string>
+    <string name="text_loc_fmt">Loc: %1$s, %2$s</string>
+
+    // Recent screen
+    <string name="recent_header">History</string>
+    <string name="recent_subtitle">Your completed tracking sessions</string>
+
+
+    <string name="btn_track_live">Track Live Location</string>
+    <string name="label_active_session">Active Session • %1$d Users</string>
+
+</resources>

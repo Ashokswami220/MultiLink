@@ -33,6 +33,7 @@ import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MoreVert
@@ -60,6 +61,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -71,16 +73,22 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.dimensionResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -109,6 +117,8 @@ fun SeeAllScreen(
     onBackClick: () -> Unit,
     onUserClick: (String) -> Unit,
     onTrackAllClick: (String) -> Unit,
+    onSessionEnded: () -> Unit,
+    onSessionPaused: () -> Unit
 ) {
     val viewModel: SessionViewModel = viewModel(factory = SessionViewModelFactory(sessionId))
     val uiState by viewModel.uiState.collectAsState()
@@ -119,8 +129,36 @@ fun SeeAllScreen(
     var lastClickTime by remember { mutableLongStateOf(0L) }
     val actionHandler = remember { SessionActionHandler(context, repository, scope) }
 
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    DisposableEffect(lifecycleOwner, sessionId) {
+        var isWatching = false
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_START) {
+                if (!isWatching) {
+                    repository.incrementSessionWatchers(sessionId)
+                    isWatching = true
+                }
+            } else if (event == Lifecycle.Event.ON_STOP) {
+                if (isWatching) {
+                    repository.decrementSessionWatchers(sessionId)
+                    isWatching = false
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            if (isWatching) {
+                repository.decrementSessionWatchers(sessionId)
+                isWatching = false
+            }
+        }
+    }
+
     val (showMenu, setShowMenu) = remember { mutableStateOf(false) }
     val (showSortOptions, setShowSortOptions) = remember { mutableStateOf(false) }
+    val (showFilterOptions, setShowFilterOptions) = remember { mutableStateOf(false) }
     val (showDeleteDialog, setShowDeleteDialog) = remember { mutableStateOf(false) }
     val (showPauseDialog, setShowPauseDialog) = remember { mutableStateOf(false) }
     val (showInfoDialog, setShowInfoDialog) = remember { mutableStateOf(false) }
@@ -133,13 +171,21 @@ fun SeeAllScreen(
             }
     }
 
+    var currentUserFilter by remember { mutableStateOf("All") }
     var currentSortType by remember { mutableStateOf(SeeAllSortType.JOINED_FIRST) }
-    val sortedParticipants = remember(uiState.participants, currentSortType) {
+
+    val sortedParticipants = remember(uiState.participants, currentSortType, currentUserFilter) {
+        val filteredList = when (currentUserFilter) {
+            "Active" -> uiState.participants.filter { it.status != "Paused" }
+            "Paused" -> uiState.participants.filter { it.status == "Paused" }
+            else -> uiState.participants
+        }
+
         when (currentSortType) {
-            SeeAllSortType.A_Z -> uiState.participants.sortedBy { it.name.lowercase() }
-            SeeAllSortType.Z_A -> uiState.participants.sortedByDescending { it.name.lowercase() }
-            SeeAllSortType.JOINED_FIRST -> uiState.participants
-            SeeAllSortType.JOINED_LATE -> uiState.participants.reversed()
+            SeeAllSortType.A_Z -> filteredList.sortedBy { it.name.lowercase() }
+            SeeAllSortType.Z_A -> filteredList.sortedByDescending { it.name.lowercase() }
+            SeeAllSortType.JOINED_FIRST -> filteredList
+            SeeAllSortType.JOINED_LATE -> filteredList.reversed()
         }
     }
 
@@ -150,19 +196,39 @@ fun SeeAllScreen(
             action()
         }
     }
-    LaunchedEffect(uiState.isSessionActive) {
-        if (!uiState.isSessionActive && !uiState.isLoading) {
-            Toast.makeText(context, "Session Ended by Host", Toast.LENGTH_LONG)
-                .show()
-            onBackClick()
-        }
-    }
 
-    LaunchedEffect(uiState.isRemoved) {
-        if (uiState.isRemoved) {
-            Toast.makeText(context, "You were removed from the session", Toast.LENGTH_LONG)
+    // --- NAVIGATION LOGIC ---
+    var isNavigatingOut by remember { mutableStateOf(false) }
+
+    LaunchedEffect(
+        uiState.isSessionActive, uiState.isRemoved, uiState.isLoading, uiState.sessionData?.status
+    ) {
+        if (uiState.isLoading || isNavigatingOut) return@LaunchedEffect
+
+        val isPaused = uiState.sessionData?.status == "Paused"
+        val isAdmin = uiState.isCurrentUserAdmin
+
+        if (!uiState.isSessionActive) {
+            isNavigatingOut = true
+            Toast.makeText(
+                context, context.getString(R.string.msg_session_ended_host), Toast.LENGTH_LONG
+            )
                 .show()
-            onBackClick()
+            onSessionEnded()
+        } else if (uiState.isRemoved) {
+            kotlinx.coroutines.delay(100)
+            isNavigatingOut = true
+            Toast.makeText(
+                context, context.getString(R.string.msg_removed_from_session), Toast.LENGTH_LONG
+            )
+                .show()
+            onSessionEnded()
+        } else if (isPaused && !isAdmin) {
+            // ⭐ FIXED: Kick non-admins, but keep service alive
+            isNavigatingOut = true
+            Toast.makeText(context, "Session paused by Host", Toast.LENGTH_LONG)
+                .show()
+            onSessionPaused()
         }
     }
 
@@ -214,20 +280,51 @@ fun SeeAllScreen(
                         IconButton(onClick = onBackClick) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBackIos,
-                                contentDescription = "Back",
+                                contentDescription = stringResource(R.string.cd_back_button),
                                 tint = MaterialTheme.colorScheme.onSurface
                             )
                         }
                     },
                     actions = {
                         Box {
-                            IconButton(onClick = {
-                                setShowMenu(true)
-                                setShowSortOptions(false)
-                            }) {
+                            IconButton(
+                                onClick = { setShowFilterOptions(true); setShowMenu(false) }) {
                                 Icon(
-                                    imageVector = Icons.Default.MoreVert,
-                                    contentDescription = "Menu",
+                                    Icons.Default.FilterList, "Filter",
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+
+                            DropdownMenu(
+                                expanded = showFilterOptions,
+                                onDismissRequest = { setShowFilterOptions(false) },
+                                shape = RoundedCornerShape(
+                                    dimensionResource(id = R.dimen.corner_menu_sheet)
+                                ),
+                                offset = DpOffset(x = 0.dp, y = 0.dp)
+                            ) {
+                                MenuRadioItem(
+                                    "Show All Users", currentUserFilter == "All"
+                                ) { currentUserFilter = "All"; setShowFilterOptions(false) }
+                                MenuRadioItem(
+                                    "Show Active", currentUserFilter == "Active"
+                                ) { currentUserFilter = "Active"; setShowFilterOptions(false) }
+                                MenuRadioItem(
+                                    "Show Paused", currentUserFilter == "Paused"
+                                ) { currentUserFilter = "Paused"; setShowFilterOptions(false) }
+                            }
+                        }
+
+                        // Existing More Options Button
+                        Box {
+                            IconButton(
+                                onClick = {
+                                    setShowMenu(true); setShowSortOptions(
+                                    false
+                                ); setShowFilterOptions(false)
+                                }) {
+                                Icon(
+                                    Icons.Default.MoreVert, stringResource(R.string.cd_menu),
                                     tint = MaterialTheme.colorScheme.onSurface
                                 )
                             }
@@ -238,101 +335,64 @@ fun SeeAllScreen(
                                 shape = RoundedCornerShape(
                                     dimensionResource(id = R.dimen.corner_menu_sheet)
                                 ),
-                                offset = DpOffset(x = (-12).dp, y = 0.dp)
+                                offset = DpOffset(
+                                    x = -dimensionResource(R.dimen.padding_medium), y = 0.dp
+                                )
                             ) {
                                 if (showSortOptions) {
+                                    // Sub-Menu: Sort
                                     DropdownMenuItem(
                                         text = {
                                             Text(
-                                                "Back", color = MaterialTheme.colorScheme.secondary
+                                                stringResource(R.string.cd_back_button),
+                                                color = MaterialTheme.colorScheme.secondary
                                             )
                                         },
                                         leadingIcon = {
                                             Icon(
-                                                Icons.AutoMirrored.Filled.KeyboardArrowLeft, null
+                                                Icons.AutoMirrored.Filled.KeyboardArrowLeft, null,
+                                                tint = MaterialTheme.colorScheme.secondary
                                             )
                                         },
                                         onClick = { setShowSortOptions(false) }
                                     )
                                     HorizontalDivider()
 
-                                    // A-Z
-                                    DropdownMenuItem(
-                                        text = { Text("Name: A - Z") },
-                                        leadingIcon = {
-                                            if (currentSortType == SeeAllSortType.A_Z)
-                                                Icon(
-                                                    Icons.Default.FiberManualRecord, null,
-                                                    modifier = Modifier.size(8.dp),
-                                                    tint = MaterialTheme.colorScheme.primary
-                                                )
-                                        },
-                                        onClick = {
-                                            currentSortType = SeeAllSortType.A_Z
-                                            setShowMenu(false)
-                                        }
+                                    MenuRadioItem(
+                                        stringResource(R.string.sort_az),
+                                        currentSortType == SeeAllSortType.A_Z
+                                    ) { currentSortType = SeeAllSortType.A_Z; setShowMenu(false) }
+                                    MenuRadioItem(
+                                        stringResource(R.string.sort_za),
+                                        currentSortType == SeeAllSortType.Z_A
+                                    ) { currentSortType = SeeAllSortType.Z_A; setShowMenu(false) }
+                                    MenuRadioItem(
+                                        stringResource(R.string.sort_joined_first),
+                                        currentSortType == SeeAllSortType.JOINED_FIRST
+                                    ) {
+                                        currentSortType = SeeAllSortType.JOINED_FIRST; setShowMenu(
+                                        false
                                     )
-                                    // Z-A
-                                    DropdownMenuItem(
-                                        text = { Text("Name: Z - A") },
-                                        leadingIcon = {
-                                            if (currentSortType == SeeAllSortType.Z_A)
-                                                Icon(
-                                                    Icons.Default.FiberManualRecord, null,
-                                                    modifier = Modifier.size(8.dp),
-                                                    tint = MaterialTheme.colorScheme.primary
-                                                )
-                                        },
-                                        onClick = {
-                                            currentSortType = SeeAllSortType.Z_A
-                                            setShowMenu(false)
-                                        }
+                                    }
+                                    MenuRadioItem(
+                                        stringResource(R.string.sort_joined_late),
+                                        currentSortType == SeeAllSortType.JOINED_LATE
+                                    ) {
+                                        currentSortType = SeeAllSortType.JOINED_LATE; setShowMenu(
+                                        false
                                     )
-                                    // Joined First
-                                    DropdownMenuItem(
-                                        text = { Text("Joined First") },
-                                        leadingIcon = {
-                                            if (currentSortType == SeeAllSortType.JOINED_FIRST)
-                                                Icon(
-                                                    Icons.Default.FiberManualRecord, null,
-                                                    modifier = Modifier.size(8.dp),
-                                                    tint = MaterialTheme.colorScheme.primary
-                                                )
-                                        },
-                                        onClick = {
-                                            currentSortType = SeeAllSortType.JOINED_FIRST
-                                            setShowMenu(false)
-                                        }
-                                    )
-                                    // Joined Late
-                                    DropdownMenuItem(
-                                        text = { Text("Joined Late") },
-                                        leadingIcon = {
-                                            if (currentSortType == SeeAllSortType.JOINED_LATE)
-                                                Icon(
-                                                    Icons.Default.FiberManualRecord, null,
-                                                    modifier = Modifier.size(8.dp),
-                                                    tint = MaterialTheme.colorScheme.primary
-                                                )
-                                        },
-                                        onClick = {
-                                            currentSortType = SeeAllSortType.JOINED_LATE
-                                            setShowMenu(false)
-                                        }
-                                    )
+                                    }
 
                                 } else {
-                                    DropdownMenuItem(
-                                        text = { Text("Session Info") },
-                                        leadingIcon = { Icon(Icons.Default.Info, null) },
-                                        onClick = {
-                                            setShowMenu(false)
-                                            setShowInfoDialog(true)
-                                        }
+                                    // Main Menu
+                                    MenuActionItem(
+                                        text = stringResource(R.string.menu_session_info),
+                                        icon = Icons.Default.Info,
+                                        onClick = { setShowMenu(false); setShowInfoDialog(true) }
                                     )
 
                                     DropdownMenuItem(
-                                        text = { Text("Sort by") },
+                                        text = { Text(stringResource(R.string.menu_sort_by)) },
                                         trailingIcon = {
                                             Icon(
                                                 Icons.AutoMirrored.Filled.KeyboardArrowRight, null
@@ -340,9 +400,17 @@ fun SeeAllScreen(
                                         },
                                         leadingIcon = {
                                             Icon(
-                                                Icons.AutoMirrored.Filled.Sort, null
+                                                Icons.AutoMirrored.Filled.Sort, null, Modifier.size(
+                                                    dimensionResource(
+                                                        R.dimen.icon_small
+                                                    )
+                                                )
                                             )
                                         },
+                                        contentPadding = PaddingValues(
+                                            horizontal = dimensionResource(R.dimen.padding_medium),
+                                            vertical = 0.dp
+                                        ),
                                         onClick = { setShowSortOptions(true) }
                                     )
 
@@ -350,40 +418,27 @@ fun SeeAllScreen(
                                         HorizontalDivider()
 
                                         val isPaused = currentSessionStatus == "Paused"
-                                        DropdownMenuItem(
-                                            text = {
-                                                Text(
-                                                    if (isPaused) "Resume Session" else "Pause Session"
-                                                )
-                                            },
-                                            leadingIcon = {
-                                                Icon(
-                                                    if (isPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
-                                                    null
-                                                )
-                                            },
+                                        MenuActionItem(
+                                            text = if (isPaused) stringResource(
+                                                R.string.menu_resume_session
+                                            ) else stringResource(R.string.menu_pause_session),
+                                            icon = if (isPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
                                             onClick = {
-                                                setShowMenu(false)
-                                                setShowPauseDialog(true)
+                                                setShowMenu(false); setShowPauseDialog(
+                                                true
+                                            )
                                             }
                                         )
 
-                                        DropdownMenuItem(
-                                            text = {
-                                                Text(
-                                                    "Delete Session",
-                                                    color = MaterialTheme.colorScheme.error
-                                                )
-                                            },
-                                            leadingIcon = {
-                                                Icon(
-                                                    Icons.Default.Delete, null,
-                                                    tint = MaterialTheme.colorScheme.error
-                                                )
-                                            },
+                                        MenuActionItem(
+                                            text = stringResource(R.string.menu_delete_session),
+                                            icon = Icons.Default.Delete,
+                                            iconColor = MaterialTheme.colorScheme.error,
+                                            textColor = MaterialTheme.colorScheme.error,
                                             onClick = {
-                                                setShowMenu(false)
-                                                setShowDeleteDialog(true)
+                                                setShowMenu(false); setShowDeleteDialog(
+                                                true
+                                            )
                                             }
                                         )
                                     }
@@ -397,7 +452,7 @@ fun SeeAllScreen(
                 )
                 HorizontalDivider(
                     color = MaterialTheme.colorScheme.surfaceVariant,
-                    thickness = 1.5.dp
+                    thickness = dimensionResource(R.dimen.divider_thickness_thick)
                 )
             }
         },
@@ -430,10 +485,15 @@ fun SeeAllScreen(
             LazyVerticalGrid(
                 columns = GridCells.Fixed(2),
                 contentPadding = PaddingValues(
-                    start = 12.dp, end = 12.dp, top = 16.dp, bottom = 140.dp
+                    start = dimensionResource(R.dimen.padding_medium),
+                    end = dimensionResource(R.dimen.padding_medium),
+                    top = dimensionResource(R.dimen.padding_standard),
+                    bottom = dimensionResource(R.dimen.padding_list_bottom)
                 ),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(
+                    dimensionResource(R.dimen.grid_spacing)
+                ),
+                verticalArrangement = Arrangement.spacedBy(dimensionResource(R.dimen.grid_spacing)),
                 modifier = Modifier.fillMaxSize()
             ) {
                 items(sortedParticipants, key = { it.id }) { user ->
@@ -459,6 +519,11 @@ fun SeeAllScreen(
                         onCallClick = { actionHandler.onCall(userPhone) },
                         onRemoveClick = {
                             actionHandler.onRemoveUser(sessionId, user.id, user.name)
+                        },
+                        onTogglePauseClick = {
+                            actionHandler.onToggleUserPause(
+                                sessionId, user.id, user.status, user.name
+                            )
                         }
                     )
                 }
@@ -476,12 +541,12 @@ fun LiveTrackBottomBar(
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 8.dp
+        tonalElevation = dimensionResource(R.dimen.elevation_dialog)
     ) {
         Column(modifier = Modifier.navigationBarsPadding()) {
             HorizontalDivider(
                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
-                thickness = 1.dp
+                thickness = dimensionResource(R.dimen.divider_thickness)
             )
 
             Column(
@@ -489,7 +554,7 @@ fun LiveTrackBottomBar(
                     .fillMaxWidth()
                     .padding(
                         horizontal = dimensionResource(id = R.dimen.padding_large),
-                        vertical = 16.dp
+                        vertical = dimensionResource(R.dimen.padding_standard)
                     )
             ) {
                 Row(
@@ -499,14 +564,14 @@ fun LiveTrackBottomBar(
                 ) {
                     Column {
                         Text(
-                            text = "Session Lobby",
+                            text = stringResource(R.string.header_session_lobby),
                             style = MaterialTheme.typography.titleMedium.copy(
                                 fontWeight = FontWeight.Bold
                             ),
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "$userCount Active Participants",
+                            text = stringResource(R.string.format_active_participants, userCount),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.primary
                         )
@@ -515,27 +580,37 @@ fun LiveTrackBottomBar(
                     Button(
                         onClick = onTrackClick,
                         enabled = !isLoading,
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(dimensionResource(R.dimen.corner_standard)),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.primary,
                             contentColor = MaterialTheme.colorScheme.onPrimary
                         ),
-                        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
-                        modifier = Modifier.heightIn(min = 48.dp)
+                        contentPadding = PaddingValues(
+                            horizontal = dimensionResource(R.dimen.padding_extra_large),
+                            vertical = dimensionResource(R.dimen.padding_medium)
+                        ),
+                        modifier = Modifier.heightIn(min = dimensionResource(R.dimen.icon_box_size))
                     ) {
                         if (isLoading) {
                             CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
+                                modifier = Modifier.size(dimensionResource(R.dimen.icon_small)),
                                 color = MaterialTheme.colorScheme.onPrimary,
-                                strokeWidth = 2.dp
+                                strokeWidth = dimensionResource(R.dimen.stroke_width_standard)
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Loading...")
+                            Spacer(
+                                modifier = Modifier.width(dimensionResource(R.dimen.padding_small))
+                            )
+                            Text(stringResource(R.string.state_loading))
                         } else {
-                            Icon(Icons.Default.Map, null, Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Icon(
+                                Icons.Default.Map, null,
+                                Modifier.size(dimensionResource(R.dimen.icon_small))
+                            )
+                            Spacer(
+                                modifier = Modifier.width(dimensionResource(R.dimen.padding_small))
+                            )
                             Text(
-                                "Track All",
+                                stringResource(R.string.btn_track_all),
                                 style = MaterialTheme.typography.titleSmall.copy(
                                     fontWeight = FontWeight.Bold
                                 )
@@ -544,18 +619,18 @@ fun LiveTrackBottomBar(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(dimensionResource(R.dimen.padding_medium)))
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         imageVector = Icons.Default.Info,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                        modifier = Modifier.size(14.dp)
+                        modifier = Modifier.size(dimensionResource(R.dimen.icon_stat))
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
+                    Spacer(modifier = Modifier.width(dimensionResource(R.dimen.padding_mini)))
                     Text(
-                        text = "Allow you to track all participants at once in one single map view.",
+                        text = stringResource(R.string.desc_track_all),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                     )
@@ -576,7 +651,8 @@ fun UserGridCard(
     destLng: Double,
     onClick: () -> Unit,
     onCallClick: () -> Unit,
-    onRemoveClick: () -> Unit
+    onRemoveClick: () -> Unit,
+    onTogglePauseClick: () -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
 
@@ -584,21 +660,25 @@ fun UserGridCard(
         LocationUtils.calculateDistance(user.lat, user.lng, destLat, destLng)
     }
 
+    val isUserPaused = user.status == "Paused"
+
     Card(
         onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(dimensionResource(R.dimen.corner_standard)),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+            containerColor = if (isUserPaused) MaterialTheme.colorScheme.surfaceVariant.copy(
+                alpha = 0.5f
+            ) else MaterialTheme.colorScheme.surfaceContainerLow
         ),
-        elevation = CardDefaults.cardElevation(2.dp),
+        elevation = CardDefaults.cardElevation(dimensionResource(R.dimen.elevation_card)),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column {
+        Column(modifier = Modifier.alpha(if (isUserPaused) 0.6f else 1f)) {
             // HEADER ROW
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(12.dp),
+                    .padding(dimensionResource(R.dimen.padding_medium)),
                 verticalAlignment = Alignment.Top,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
@@ -607,7 +687,7 @@ fun UserGridCard(
                     Surface(
                         shape = CircleShape,
                         color = MaterialTheme.colorScheme.primaryContainer,
-                        modifier = Modifier.size(48.dp)
+                        modifier = Modifier.size(dimensionResource(R.dimen.icon_box_size))
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             if (photoUrl != null) {
@@ -624,7 +704,9 @@ fun UserGridCard(
                                 Icon(
                                     Icons.Default.Person, null,
                                     tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    modifier = Modifier.size(24.dp)
+                                    modifier = Modifier.size(
+                                        dimensionResource(R.dimen.icon_inside_box)
+                                    )
                                 )
                             }
                         }
@@ -632,14 +714,20 @@ fun UserGridCard(
                     // Status Dot
                     Box(
                         modifier = Modifier
-                            .size(12.dp)
+                            .size(dimensionResource(R.dimen.padding_medium))
                             .align(Alignment.BottomEnd)
                             .clip(CircleShape)
                             .background(
-                                if (user.status == "Online") Color(0xFF4CAF50) else Color.Gray
+                                if (isUserPaused) Color(
+                                    0xFFFF9800
+                                ) else if (user.status == "Online") Color(
+                                    0xFF4CAF50
+                                ) else Color.Gray
                             )
                             .border(
-                                2.dp, MaterialTheme.colorScheme.surfaceContainerLow, CircleShape
+                                dimensionResource(R.dimen.stroke_width_standard),
+                                MaterialTheme.colorScheme.surfaceContainerLow,
+                                CircleShape
                             )
                     )
                 }
@@ -649,20 +737,25 @@ fun UserGridCard(
                 if (isCardUserAdmin) {
                     Surface(
                         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.padding(end = 4.dp)
+                        shape = RoundedCornerShape(dimensionResource(R.dimen.corner_small)),
+                        modifier = Modifier.padding(end = dimensionResource(R.dimen.padding_tiny))
                     ) {
                         Row(
-                            Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                            Modifier.padding(
+                                horizontal = dimensionResource(R.dimen.padding_mini),
+                                vertical = dimensionResource(R.dimen.padding_tiny)
+                            ),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                Icons.Default.Shield, null, Modifier.size(10.dp),
+                                Icons.Default.Shield, null,
+                                Modifier.size(dimensionResource(R.dimen.icon_micro)),
                                 tint = MaterialTheme.colorScheme.primary
                             )
-                            Spacer(Modifier.width(4.dp))
+                            Spacer(Modifier.width(dimensionResource(R.dimen.padding_tiny)))
                             Text(
-                                "ADMIN", style = MaterialTheme.typography.labelSmall.copy(
+                                stringResource(R.string.label_admin),
+                                style = MaterialTheme.typography.labelSmall.copy(
                                     fontSize = 9.sp, fontWeight = FontWeight.Bold
                                 ), color = MaterialTheme.colorScheme.primary
                             )
@@ -673,10 +766,10 @@ fun UserGridCard(
                 Box {
                     IconButton(
                         onClick = { expanded = true },
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(dimensionResource(R.dimen.icon_inside_box))
                     ) {
                         Icon(
-                            Icons.Default.MoreVert, "Menu",
+                            Icons.Default.MoreVert, stringResource(R.string.cd_menu),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -687,32 +780,73 @@ fun UserGridCard(
                         shape = RoundedCornerShape(
                             dimensionResource(id = R.dimen.corner_menu_sheet)
                         ),
-                        offset = DpOffset(x = (-90).dp, y = (5).dp),
+                        offset = DpOffset(
+                            x = -dimensionResource(R.dimen.menu_offset_x_large),
+                            y = dimensionResource(R.dimen.menu_offset_y_small)
+                        ),
                         modifier = Modifier
-                            .widthIn(max = 120.dp)
+                            .widthIn(max = dimensionResource(R.dimen.menu_max_width))
                     ) {
                         DropdownMenuItem(
-                            text = { Text("Call", fontSize = 14.sp) },
-                            leadingIcon = { Icon(Icons.Default.Call, null, Modifier.size(18.dp)) },
+                            text = { Text(stringResource(R.string.action_call), fontSize = 14.sp) },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Default.Call, null, Modifier.size(
+                                        dimensionResource(R.dimen.icon_small)
+                                    )
+                                )
+                            },
                             onClick = { expanded = false; onCallClick() },
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+                            contentPadding = PaddingValues(
+                                horizontal = dimensionResource(R.dimen.padding_medium),
+                                vertical = 0.dp
+                            )
                         )
+
                         if (isViewerAdmin && !isCardUserAdmin) {
                             DropdownMenuItem(
                                 text = {
                                     Text(
-                                        "Remove", color = MaterialTheme.colorScheme.error,
+                                        if (isUserPaused) "Resume Tracking" else "Pause User",
                                         fontSize = 14.sp
                                     )
                                 },
                                 leadingIcon = {
                                     Icon(
-                                        Icons.Default.Delete, null, Modifier.size(18.dp),
+                                        if (isUserPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                                        null,
+                                        Modifier.size(dimensionResource(R.dimen.icon_small)),
+                                    )
+                                },
+                                onClick = { expanded = false; onTogglePauseClick() },
+                                contentPadding = PaddingValues(
+                                    horizontal = dimensionResource(R.dimen.padding_medium),
+                                    vertical = 0.dp
+                                )
+                            )
+                        }
+
+                        if (isViewerAdmin && !isCardUserAdmin) {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        stringResource(R.string.action_remove),
+                                        color = MaterialTheme.colorScheme.error,
+                                        fontSize = 14.sp
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Default.Delete, null,
+                                        Modifier.size(dimensionResource(R.dimen.icon_small)),
                                         tint = MaterialTheme.colorScheme.error
                                     )
                                 },
                                 onClick = { expanded = false; onRemoveClick() },
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+                                contentPadding = PaddingValues(
+                                    horizontal = dimensionResource(R.dimen.padding_medium),
+                                    vertical = 0.dp
+                                )
                             )
                         }
                     }
@@ -720,21 +854,24 @@ fun UserGridCard(
             }
 
             // INFO BLOCK
-            Column(modifier = Modifier.padding(horizontal = 12.dp)) {
+            Column(
+                modifier = Modifier.padding(horizontal = dimensionResource(R.dimen.padding_medium))
+            ) {
                 Text(
                     text = user.name,
                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                     maxLines = 1, overflow = TextOverflow.Ellipsis
                 )
-                Spacer(modifier = Modifier.height(2.dp))
+                Spacer(modifier = Modifier.height(dimensionResource(R.dimen.padding_micro)))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        Icons.Default.Phone, null, Modifier.size(12.dp),
+                        Icons.Default.Phone, null,
+                        Modifier.size(dimensionResource(R.dimen.icon_tiny)),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(Modifier.width(4.dp))
+                    Spacer(Modifier.width(dimensionResource(R.dimen.padding_tiny)))
                     Text(
-                        text = phoneNumber.ifEmpty { "No Contact" },
+                        text = phoneNumber.ifEmpty { stringResource(R.string.placeholder_number) },
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1
@@ -742,31 +879,33 @@ fun UserGridCard(
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(dimensionResource(R.dimen.padding_medium)))
 
-            // ⭐ FOOTER (Transparent background + Divider)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    // Reverted background to match card (transparent on top of card color)
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .padding(
+                        horizontal = dimensionResource(R.dimen.padding_medium),
+                        vertical = dimensionResource(R.dimen.padding_small)
+                    )
             ) {
-                // ⭐ ADDED DIVIDER
                 HorizontalDivider(
                     color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
-                    modifier = Modifier.padding(bottom = 8.dp)
+                    modifier = Modifier.padding(bottom = dimensionResource(R.dimen.padding_small))
                 )
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         Icons.Outlined.NearMe, null,
                         tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(14.dp)
+                        modifier = Modifier.size(dimensionResource(R.dimen.icon_stat))
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    // ⭐ CHANGED TEXT FORMAT
+                    Spacer(modifier = Modifier.width(dimensionResource(R.dimen.padding_mini)))
+
                     Text(
-                        text = if (distanceString == "...") "Calculating..." else "$distanceString to reach dest",
+                        text = if (distanceString == "...") stringResource(
+                            R.string.state_calculating
+                        ) else stringResource(R.string.format_distance_to_dest, distanceString),
                         style = MaterialTheme.typography.labelSmall.copy(
                             fontWeight = FontWeight.SemiBold
                         ),
@@ -776,4 +915,51 @@ fun UserGridCard(
             }
         }
     }
+}
+
+@Composable
+private fun MenuRadioItem(
+    text: String,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    DropdownMenuItem(
+        text = { Text(text) },
+        leadingIcon = {
+            if (isSelected) {
+                Icon(
+                    Icons.Default.FiberManualRecord,
+                    contentDescription = null,
+                    modifier = Modifier.size(dimensionResource(R.dimen.indicator_dot_size)),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            } else {
+                Spacer(modifier = Modifier.size(dimensionResource(R.dimen.indicator_dot_size)))
+            }
+        },
+        onClick = onClick,
+        contentPadding = PaddingValues(
+            horizontal = dimensionResource(R.dimen.padding_medium), vertical = 0.dp
+        )
+    )
+}
+
+@Composable
+private fun MenuActionItem(
+    text: String,
+    icon: ImageVector,
+    iconColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    textColor: Color = MaterialTheme.colorScheme.onSurface,
+    onClick: () -> Unit
+) {
+    DropdownMenuItem(
+        text = { Text(text, color = textColor, fontSize = 14.sp) },
+        leadingIcon = {
+            Icon(icon, null, Modifier.size(dimensionResource(R.dimen.icon_small)), tint = iconColor)
+        },
+        onClick = onClick,
+        contentPadding = PaddingValues(
+            horizontal = dimensionResource(R.dimen.padding_medium), vertical = 0.dp
+        )
+    )
 }

@@ -1,25 +1,50 @@
 package com.example.multilink.repo
 
 import android.util.Log
+import com.example.multilink.model.ActivityFeedItem
+import com.example.multilink.model.RecentSession
 import com.example.multilink.model.SessionData
 import com.example.multilink.model.SessionParticipant
+import com.example.multilink.model.UserStats
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.database.MutableData
 import com.google.firebase.database.ServerValue
+import com.google.firebase.database.Transaction
 import com.google.firebase.database.ValueEventListener
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
+import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
+import com.example.multilink.model.toSessionData
+import com.example.multilink.utils.LocationUtils.calculateDistance
 
 class RealtimeRepository {
 
     private val db = FirebaseDatabase.getInstance().reference
     private val auth = FirebaseAuth.getInstance()
 
+
+    fun listenToSessionStatus(sessionId: String): Flow<String> = callbackFlow {
+        val ref = db.child("sessions")
+            .child(sessionId)
+            .child("status")
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                trySend(snapshot.getValue(String::class.java) ?: "Live")
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                close(error.toException())
+            }
+        }
+        ref.addValueEventListener(listener)
+        awaitClose { ref.removeEventListener(listener) }
+    }
 
     suspend fun getGlobalUserProfile(userId: String): Map<String, String>? {
         return try {
@@ -31,15 +56,22 @@ class RealtimeRepository {
                 .await()
 
             if (snapshot.exists()) {
+                val dbName = snapshot.child("name").value as? String ?: "Unknown"
+                var dbPhotoUrl = snapshot.child("photoUrl").value as? String ?: ""
+
+                if (dbPhotoUrl.isEmpty()) {
+                    val encodedName = URLEncoder.encode(dbName, "UTF-8")
+                    dbPhotoUrl =
+                        "https://ui-avatars.com/api/?name=$encodedName&background=random&color=fff&size=256"
+                }
+
                 mapOf(
-                    "name" to (snapshot.child("name").value as? String ?: "Unknown"),
+                    "name" to dbName,
                     "phone" to (snapshot.child("phoneNumber").value as? String ?: ""),
                     "email" to (snapshot.child("email").value as? String ?: ""),
-                    "photoUrl" to (snapshot.child("photoUrl").value as? String ?: "")
+                    "photoUrl" to dbPhotoUrl
                 )
             } else {
-                // 2. Fallback to FirebaseAuth basic info if no DB profile
-                // This ensures we at least get the Google Photo if available
                 val user = auth.currentUser
                 if (user != null && user.uid == userId) {
                     mapOf(
@@ -54,6 +86,99 @@ class RealtimeRepository {
             e.printStackTrace(); null
         }
     }
+
+
+    // --- ADAPTIVE TRACKING (WATCHER SYSTEM) ---
+    private fun adjustWatcherCount(
+        ref: com.google.firebase.database.DatabaseReference, delta: Int
+    ) {
+        ref.runTransaction(object : Transaction.Handler {
+            override fun doTransaction(currentData: MutableData): Transaction.Result {
+                var count = currentData.getValue(Int::class.java) ?: 0
+                count += delta
+                if (count < 0) count = 0 // Prevent negative counts
+                currentData.value = count
+                return Transaction.success(currentData)
+            }
+
+            override fun onComplete(
+                error: DatabaseError?, committed: Boolean, snapshot: DataSnapshot?
+            ) {
+                if (error != null) Log.e(
+                    "RealtimeRepo", "Watcher Transaction failed", error.toException()
+                )
+            }
+        })
+    }
+
+    fun incrementSessionWatchers(sessionId: String) {
+        val ref = db.child("sessions")
+            .child(sessionId)
+            .child("sessionWatchers")
+        adjustWatcherCount(ref, 1)
+    }
+
+    fun decrementSessionWatchers(sessionId: String) {
+        val ref = db.child("sessions")
+            .child(sessionId)
+            .child("sessionWatchers")
+        adjustWatcherCount(ref, -1)
+    }
+
+    fun incrementUserWatchers(sessionId: String, targetUserId: String) {
+        val ref = db.child("sessions")
+            .child(sessionId)
+            .child("users")
+            .child(targetUserId)
+            .child("userWatchers")
+        adjustWatcherCount(ref, 1)
+    }
+
+    fun decrementUserWatchers(sessionId: String, targetUserId: String) {
+        val ref = db.child("sessions")
+            .child(sessionId)
+            .child("users")
+            .child(targetUserId)
+            .child("userWatchers")
+        adjustWatcherCount(ref, -1)
+    }
+
+    fun listenToSessionWatchers(sessionId: String): Flow<Int> = callbackFlow {
+        val ref = db.child("sessions")
+            .child(sessionId)
+            .child("sessionWatchers")
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                trySend(snapshot.getValue(Int::class.java) ?: 0)
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                close(error.toException())
+            }
+        }
+        ref.addValueEventListener(listener)
+        awaitClose { ref.removeEventListener(listener) }
+    }
+
+    fun listenToUserWatchers(sessionId: String, userId: String): Flow<Int> = callbackFlow {
+        val ref = db.child("sessions")
+            .child(sessionId)
+            .child("users")
+            .child(userId)
+            .child("userWatchers")
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                trySend(snapshot.getValue(Int::class.java) ?: 0)
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                close(error.toException())
+            }
+        }
+        ref.addValueEventListener(listener)
+        awaitClose { ref.removeEventListener(listener) }
+    }
+
 
     // --- 2. ZOMBIE FIX: LISTEN FOR KICK ---
     fun listenForRemoval(sessionId: String): Flow<Boolean> = callbackFlow {
@@ -71,8 +196,10 @@ class RealtimeRepository {
 
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                // If snapshot does NOT exist, it means we were deleted/kicked
-                if (!snapshot.exists()) {
+                // If it doesn't exist, OR if it lost its ID (became a zombie write)
+                if (!snapshot.exists() || !snapshot.child("id")
+                        .exists()
+                ) {
                     trySend(true)
                 } else {
                     trySend(false)
@@ -88,7 +215,27 @@ class RealtimeRepository {
     }
 
     suspend fun removeUser(sessionId: String, targetUserId: String) {
+        if (targetUserId.isBlank()) return
         try {
+            val snapshot = db.child("sessions")
+                .child(sessionId)
+                .get()
+                .await()
+            val sessionDataMap = snapshot.value as? Map<String, Any>
+            if (sessionDataMap != null) {
+                val sessionData = sessionDataMap.toSessionData(sessionId)
+                val pCount = snapshot.child("users").childrenCount.toInt()
+                archiveSessionForUser(targetUserId, sessionData, pCount, "Removed by Admin")
+
+                sendFeedItem(
+                    targetUserId,
+                    type = "alert",
+                    title = "Removed from Session",
+                    message = "You were removed from '${sessionData.title}' by the host.",
+                    sessionId = sessionId
+                )
+            }
+
             db.child("sessions")
                 .child(sessionId)
                 .child("users")
@@ -135,6 +282,23 @@ class RealtimeRepository {
                 .child(sessionId)
                 .child("users")
                 .child(userId)
+                .updateChildren(updates)
+                .await()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    suspend fun updateUserStatusForAdmin(sessionId: String, targetUserId: String, status: String) {
+        val updates = mapOf(
+            "status" to status,
+            "lastUpdated" to System.currentTimeMillis()
+        )
+        try {
+            db.child("sessions")
+                .child(sessionId)
+                .child("users")
+                .child(targetUserId)
                 .updateChildren(updates)
                 .await()
         } catch (e: Exception) {
@@ -219,7 +383,25 @@ class RealtimeRepository {
                 .await()
             val hostId = snapshot.child("hostId")
                 .getValue(String::class.java)
+
             if (hostId == userId) {
+                val sessionDataMap = snapshot.value as? Map<String, Any>
+
+                if (sessionDataMap != null) {
+                    val sessionData = sessionDataMap.toSessionData(sessionId)
+                    val usersSnapshot = snapshot.child("users")
+                    val pCount = usersSnapshot.childrenCount.toInt()
+
+                    usersSnapshot.children.forEach { userSnap ->
+                        val uId = userSnap.child("id")
+                            .getValue(String::class.java)
+                        if (!uId.isNullOrEmpty()) {
+                            val reason =
+                                if (uId == userId) "You ended the session" else "Ended by Admin"
+                            archiveSessionForUser(uId, sessionData, pCount, reason)
+                        }
+                    }
+                }
                 // Permanently remove the session
                 db.child("sessions")
                     .child(sessionId)
@@ -290,7 +472,14 @@ class RealtimeRepository {
                             .getValue(String::class.java) ?: ""
                         val isParticipant = child.child("users")
                             .hasChild(userId)
-                        val userCount = child.child("users").childrenCount.toInt()
+                        var userCount = 0
+                        child.child("users").children.forEach { userSnapshot ->
+                            if (userSnapshot.child("id")
+                                    .exists()
+                            ) {
+                                userCount++
+                            }
+                        }
 
                         if (hostId == userId || isParticipant) {
                             val isActive =
@@ -355,7 +544,6 @@ class RealtimeRepository {
         awaitClose { query.removeEventListener(listener) }
     }
 
-    // --- UPDATED JOIN LOGIC (CLEAN DATA) ---
     suspend fun joinSession(sessionId: String): Boolean {
         return try {
             val currentUser = auth.currentUser ?: return false
@@ -383,6 +571,9 @@ class RealtimeRepository {
                 .child(currentUser.uid)
                 .updateChildren(joinData)
                 .await()
+            incrementUserStats(
+                currentUser.uid, distanceMeters = 0.0, timeSeconds = 0L, sessionDelta = 1
+            )
             true
         } catch (e: Exception) {
             e.printStackTrace(); false
@@ -447,7 +638,7 @@ class RealtimeRepository {
         awaitClose { ref.removeEventListener(listener) }
     }
 
-    //  UPDATED: Returns Clean SessionParticipant List
+    //  UPDATED: Returns Clean SessionParticipant List (Filters out ghost nodes)
     fun getSessionUsers(sessionId: String): Flow<List<SessionParticipant>> = callbackFlow {
         val ref = db.child("sessions")
             .child(sessionId)
@@ -457,7 +648,12 @@ class RealtimeRepository {
                 val users = mutableListOf<SessionParticipant>()
                 for (child in snapshot.children) {
                     child.getValue(SessionParticipant::class.java)
-                        ?.let { users.add(it) }
+                        ?.let { user ->
+                            // FIXED: Ignore partial zombie nodes created by dying background services
+                            if (user.id.isNotEmpty()) {
+                                users.add(user)
+                            }
+                        }
                 }
                 trySend(users)
             }
@@ -469,6 +665,7 @@ class RealtimeRepository {
         ref.addValueEventListener(listener)
         awaitClose { ref.removeEventListener(listener) }
     }
+
 
     // --- 3. LIVE TRACKING ---
     suspend fun updateMyLocation(
@@ -515,15 +712,392 @@ class RealtimeRepository {
     }
 
 
-    suspend fun leaveSession(
-        sessionId: String
-    ) {
+    suspend fun leaveSession(sessionId: String) {
+        val userId = auth.currentUser?.uid ?: return
+        try {
+            val snapshot = db.child("sessions")
+                .child(sessionId)
+                .get()
+                .await()
+            val sessionDataMap = snapshot.value as? Map<String, Any>
+
+            if (sessionDataMap != null) {
+                val sessionData = sessionDataMap.toSessionData(sessionId)
+                val pCount = snapshot.child("users").childrenCount.toInt()
+                archiveSessionForUser(userId, sessionData, pCount, "You left the session")
+            }
+
+            db.child("sessions")
+                .child(sessionId)
+                .child("users")
+                .child(userId)
+                .removeValue()
+                .await()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    // Cleans up accidental zombie nodes
+    suspend fun deleteMyNode(sessionId: String) {
         val userId = auth.currentUser?.uid ?: return
         try {
             db.child("sessions")
                 .child(sessionId)
                 .child("users")
                 .child(userId)
+                .removeValue()
+                .await()
+        } catch (_: Exception) {
+        }
+    }
+
+
+    // --- RECENT SESSIONS (HISTORY) ---
+
+    private suspend fun archiveSessionForUser(
+        userId: String, sessionData: SessionData, participantsCount: Int, reason: String
+    ) {
+        val recentRef = db.child("users")
+            .child(userId)
+            .child("recent_sessions")
+        val now = System.currentTimeMillis()
+
+        // 1. Calculate Real Distance
+        val distanceStr = try {
+            calculateDistance(
+                sessionData.startLat ?: 0.0, sessionData.startLng ?: 0.0,
+                sessionData.endLat ?: 0.0, sessionData.endLng ?: 0.0
+            )
+        } catch (_: Exception) {
+            "..."
+        }
+        val finalDistance = if (distanceStr == "...") "N/A" else distanceStr
+
+        val rawDistanceMeters = try {
+            val num = finalDistance.replace("[^0-9.]".toRegex(), "")
+                .toDoubleOrNull() ?: 0.0
+            if (finalDistance.contains("km", ignoreCase = true)) {
+                num * 1000.0 // Convert km back to meters
+            } else {
+                num // Already in meters
+            }
+        } catch (e: Exception) {
+            0.0
+        }
+
+        // 2. Calculate Real Duration
+        val durationMs =
+            if (sessionData.createdTimestamp > 0) now - sessionData.createdTimestamp else 0L
+        val hours = TimeUnit.MILLISECONDS.toHours(durationMs)
+        val mins = TimeUnit.MILLISECONDS.toMinutes(durationMs) % 60
+        val durationStr = if (hours > 0) "${hours}h ${mins}m" else "${mins}m"
+
+        val dateStr = java.text.SimpleDateFormat("dd MMM • h:mm a", java.util.Locale.getDefault())
+            .format(java.util.Date(now))
+
+        val hostProfile = getGlobalUserProfile(sessionData.hostId)
+        val hostPhone = hostProfile?.get("phone")
+            ?.takeIf { it.isNotEmpty() } ?: "Not Shared"
+        val hostEmail = hostProfile?.get("email")
+            ?.takeIf { it.isNotEmpty() } ?: "Not Shared"
+
+        val recentSessionMap = mapOf(
+            "id" to sessionData.id,
+            "title" to sessionData.title,
+            "completedDate" to dateStr,
+            "completedTimestamp" to now,
+            "duration" to durationStr,
+            "participants" to "$participantsCount Users",
+            "startLoc" to sessionData.fromLocation,
+            "endLoc" to sessionData.toLocation,
+            "totalDistance" to finalDistance,
+            "hostName" to sessionData.hostName,
+            "hostPhone" to hostPhone,
+            "hostEmail" to hostEmail,
+            "completionReason" to reason,
+            "startLat" to sessionData.startLat,
+            "startLng" to sessionData.startLng,
+            "endLat" to sessionData.endLat,
+            "endLng" to sessionData.endLng
+        )
+
+        try {
+            recentRef.child(sessionData.id)
+                .setValue(recentSessionMap)
+                .await()
+
+            val durationSeconds = durationMs / 1000
+            incrementUserStats(userId, rawDistanceMeters, durationSeconds, 0)
+
+            // Cleanup: Max 10 Sessions Rule
+            val snapshot = recentRef.get()
+                .await()
+            val allSessions = snapshot.children.mapNotNull { child ->
+                val map = child.value as? Map<*, *>
+                if (map != null) {
+                    val id = map["id"] as? String ?: ""
+                    val ts = (map["completedTimestamp"] as? Number)?.toLong() ?: 0L
+                    Pair(id, ts)
+                } else null
+            }
+                .sortedByDescending { it.second }
+
+            if (allSessions.size > 10) {
+                for (i in 10 until allSessions.size) {
+                    recentRef.child(allSessions[i].first)
+                        .removeValue()
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    fun getRecentSessions(): Flow<List<RecentSession>> = callbackFlow {
+        val userId = auth.currentUser?.uid
+        if (userId == null) {
+            trySend(emptyList())
+            close()
+            return@callbackFlow
+        }
+
+        val ref = db.child("users")
+            .child(userId)
+            .child("recent_sessions")
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val sessions = mutableListOf<RecentSession>()
+                val now = System.currentTimeMillis()
+                val tenDaysAgo = now - (10L * 24 * 60 * 60 * 1000)
+
+                for (child in snapshot.children) {
+                    try {
+                        val map = child.value as? Map<*, *> ?: continue
+                        val completedTimestamp =
+                            (map["completedTimestamp"] as? Number)?.toLong() ?: 0L
+
+                        if (completedTimestamp < tenDaysAgo) {
+                            child.ref.removeValue() // Self-cleaning
+                        } else {
+                            sessions.add(
+                                RecentSession(
+                                    id = map["id"] as? String ?: "",
+                                    title = map["title"] as? String ?: "Unnamed Session",
+                                    completedDate = map["completedDate"] as? String ?: "",
+                                    completedTimestamp = completedTimestamp,
+                                    duration = map["duration"] as? String ?: "",
+                                    participants = map["participants"] as? String ?: "",
+                                    startLoc = map["startLoc"] as? String ?: "",
+                                    endLoc = map["endLoc"] as? String ?: "",
+                                    totalDistance = map["totalDistance"] as? String ?: "",
+                                    hostName = map["hostName"] as? String ?: "",
+                                    hostPhone = map["hostPhone"] as? String ?: "",
+                                    hostEmail = map["hostEmail"] as? String ?: "",
+                                    completionReason = map["completionReason"] as? String ?: "",
+                                    startLat = (map["startLat"] as? Number)?.toDouble(),
+                                    startLng = (map["startLng"] as? Number)?.toDouble(),
+                                    endLat = (map["endLat"] as? Number)?.toDouble(),
+                                    endLng = (map["endLng"] as? Number)?.toDouble()
+                                )
+                            )
+                        }
+                    } catch (_: Exception) {
+                        // If a node is completely broken, ignore it and let the app live!
+                        child.ref.removeValue()
+                    }
+                }
+                trySend(sessions)
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                close(error.toException())
+            }
+        }
+        ref.addValueEventListener(listener)
+        awaitClose { ref.removeEventListener(listener) }
+    }
+
+    suspend fun deleteRecentSession(sessionId: String) {
+        val userId = auth.currentUser?.uid ?: return
+        try {
+            db.child("users")
+                .child(userId)
+                .child("recent_sessions")
+                .child(sessionId)
+                .removeValue()
+                .await()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun incrementUserStats(
+        userId: String, distanceMeters: Double, timeSeconds: Long, sessionDelta: Int
+    ) {
+        val statsRef = db.child("users")
+            .child(userId)
+            .child("stats")
+        statsRef.runTransaction(object : Transaction.Handler {
+            override fun doTransaction(currentData: MutableData): Transaction.Result {
+                val currentDistance = currentData.child("totalDistanceMeters")
+                    .getValue(Double::class.java) ?: 0.0
+                val currentTime = currentData.child("totalTimeSeconds")
+                    .getValue(Long::class.java) ?: 0L
+                val currentSessions = currentData.child("totalSessions")
+                    .getValue(Int::class.java) ?: 0
+
+                currentData.child("totalDistanceMeters").value = currentDistance + distanceMeters
+                currentData.child("totalTimeSeconds").value = currentTime + timeSeconds
+                currentData.child("totalSessions").value = currentSessions + sessionDelta
+
+                return Transaction.success(currentData)
+            }
+
+            override fun onComplete(
+                error: DatabaseError?, committed: Boolean, snapshot: DataSnapshot?
+            ) {
+                if (error != null) Log.e(
+                    "RealtimeRepo", "Stats Transaction failed", error.toException()
+                )
+            }
+        })
+    }
+
+    fun listenToUserStats(): Flow<UserStats> = callbackFlow {
+        val userId = auth.currentUser?.uid
+        if (userId == null) {
+            trySend(UserStats())
+            close()
+            return@callbackFlow
+        }
+
+        val ref = db.child("users")
+            .child(userId)
+            .child("stats")
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                try {
+                    // ⭐ FIXED: Manual parsing prevents Firebase Reflection crashes
+                    if (!snapshot.exists()) {
+                        trySend(UserStats()) // Send 0s if it doesn't exist
+                        return
+                    }
+                    val stats = UserStats(
+                        totalDistanceMeters = (snapshot.child(
+                            "totalDistanceMeters"
+                        ).value as? Number)?.toDouble() ?: 0.0,
+                        totalTimeSeconds = (snapshot.child(
+                            "totalTimeSeconds"
+                        ).value as? Number)?.toLong() ?: 0L,
+                        totalSessions = (snapshot.child("totalSessions").value as? Number)?.toInt()
+                            ?: 0
+                    )
+                    trySend(stats)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    trySend(UserStats()) // Fallback on error
+                }
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                close(error.toException())
+            }
+        }
+        ref.addValueEventListener(listener)
+        awaitClose { ref.removeEventListener(listener) }
+    }
+
+    // --- ACTIVITY FEED INBOX ---
+    fun listenToActivityFeed(): Flow<List<ActivityFeedItem>> = callbackFlow {
+        val userId = auth.currentUser?.uid
+        if (userId == null) {
+            trySend(emptyList())
+            close()
+            return@callbackFlow
+        }
+
+        val ref = db.child("user_activity_feed")
+            .child(userId)
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                try {
+                    val feed = mutableListOf<ActivityFeedItem>()
+                    // ⭐ FIXED: Manual parsing handles missing or weird data safely
+                    if (snapshot.exists()) {
+                        for (child in snapshot.children) {
+                            val map = child.value as? Map<*, *> ?: continue
+                            val item = ActivityFeedItem(
+                                id = map["id"] as? String ?: "",
+                                type = map["type"] as? String ?: "alert",
+                                title = map["title"] as? String ?: "",
+                                message = map["message"] as? String ?: "",
+                                sessionId = map["sessionId"] as? String ?: "",
+                                timestamp = (map["timestamp"] as? Number)?.toLong() ?: 0L,
+                                isRead = map["isRead"] as? Boolean ?: false
+                            )
+                            feed.add(item)
+                        }
+                    }
+                    trySend(feed.sortedByDescending { it.timestamp })
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    trySend(emptyList()) // Fallback to empty list on error
+                }
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                close(error.toException())
+            }
+        }
+        ref.addValueEventListener(listener)
+        awaitClose { ref.removeEventListener(listener) }
+    }
+
+    suspend fun sendFeedItem(
+        targetUserId: String, type: String, title: String, message: String, sessionId: String = ""
+    ) {
+        try {
+            val feedRef = db.child("user_activity_feed")
+                .child(targetUserId)
+                .push()
+            val itemId = feedRef.key ?: return
+
+            val newItem = ActivityFeedItem(
+                id = itemId,
+                type = type,
+                title = title,
+                message = message,
+                sessionId = sessionId,
+                timestamp = System.currentTimeMillis(),
+                isRead = false
+            )
+            feedRef.setValue(newItem)
+                .await()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    suspend fun markFeedItemRead(itemId: String) {
+        val userId = auth.currentUser?.uid ?: return
+        try {
+            db.child("user_activity_feed")
+                .child(userId)
+                .child(itemId)
+                .child("isRead")
+                .setValue(true)
+                .await()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    suspend fun deleteFeedItem(itemId: String) {
+        val userId = auth.currentUser?.uid ?: return
+        try {
+            db.child("user_activity_feed")
+                .child(userId)
+                .child(itemId)
                 .removeValue()
                 .await()
         } catch (e: Exception) {

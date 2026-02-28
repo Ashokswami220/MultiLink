@@ -50,7 +50,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.multilink.repo.RealtimeRepository
+import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -69,6 +71,9 @@ fun UnifiedJoinDialog(
 
     val pagerState = rememberPagerState(pageCount = { 2 })
 
+    val isFromLink = initialCode != null
+    val currentUserId = remember { FirebaseAuth.getInstance().currentUser?.uid ?: "" }
+
     // --- STATE ---
     var inputCode by rememberSaveable { mutableStateOf(initialCode ?: "") }
     var isLoading by rememberSaveable { mutableStateOf(false) }
@@ -85,6 +90,7 @@ fun UnifiedJoinDialog(
     var maxLimit by rememberSaveable { mutableIntStateOf(0) }
     var duration by rememberSaveable { mutableStateOf("2 Hrs") }
     var status by rememberSaveable { mutableStateOf("Live") }
+    var isSharingAllowed by rememberSaveable { mutableStateOf(true) }
 
     // Contact Info
     var hostPhone by rememberSaveable { mutableStateOf("Loading...") }
@@ -92,11 +98,14 @@ fun UnifiedJoinDialog(
 
     var showInfo by rememberSaveable { mutableStateOf(false) }
 
+    var fetchedCode by rememberSaveable { mutableStateOf("") }
+
     fun fetchAndMoveToPreview() {
         if (inputCode.length < 8) {
             errorMsg = "Code must be 8 characters."
             return
         }
+        fetchedCode = inputCode
 
         focusManager.clearFocus(force = true)
         keyboardController?.hide()
@@ -109,21 +118,43 @@ fun UnifiedJoinDialog(
                 if (inputCode.length > 10) inputCode else repository.getSessionIdFromCode(inputCode)
 
             if (resolvedId != null) {
+                try {
+                    val currentUsers = repository.getSessionUsers(resolvedId)
+                        .first()
+                    val isAlreadyJoined = currentUsers.any { it.id == currentUserId }
+
+                    if (isAlreadyJoined) {
+                        isLoading = false
+                        errorMsg = "You have already joined this session."
+                        return@launch // Stop execution right here
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+
                 realSessionId = resolvedId
                 repository.getSessionDetails(resolvedId)
                     .collectLatest { data ->
                         if (data.isNotEmpty()) {
+                            val sessionStatus = data["status"] as? String ?: "Live"
+                            if (sessionStatus == "Ended") {
+                                isLoading = false
+                                errorMsg = "This session has already ended."
+                                return@collectLatest
+                            }
+
                             sessionTitle = data["title"] as? String ?: "MultiLink Session"
                             hostName = data["hostName"] as? String ?: "Unknown"
                             hostId = data["hostId"] as? String ?: ""
                             fromLoc = data["fromLocation"] as? String ?: "Start"
                             toLoc = data["toLocation"] as? String ?: "End"
                             maxLimit = (data["maxPeople"] as? String)?.toIntOrNull() ?: 0
+                            isSharingAllowed = data["isSharingAllowed"] as? Boolean ?: true
 
                             val dVal = data["durationVal"] as? String ?: "2"
                             val dUnit = data["durationUnit"] as? String ?: "Hrs"
                             duration = "$dVal $dUnit"
-                            status = data["status"] as? String ?: "Live"
+                            status = sessionStatus
 
                             if (hostId.isNotEmpty()) {
                                 val profile = repository.getGlobalUserProfile(hostId)
@@ -149,6 +180,7 @@ fun UnifiedJoinDialog(
             }
         }
     }
+
 
     LaunchedEffect(Unit) {
         if (!initialCode.isNullOrEmpty()) fetchAndMoveToPreview()
@@ -369,21 +401,24 @@ fun UnifiedJoinDialog(
 
                                     Spacer(modifier = Modifier.width(8.dp))
 
-                                    Surface(
-                                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                        shape = RoundedCornerShape(50),
-                                    ) {
-                                        Text(
-                                            inputCode,
-                                            style = MaterialTheme.typography.labelMedium.copy(
-                                                fontFamily = FontFamily.Monospace,
-                                                fontWeight = FontWeight.Bold
-                                            ),
-                                            modifier = Modifier.padding(
-                                                horizontal = 12.dp, vertical = 4.dp
-                                            ),
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
+                                    if (isSharingAllowed) {
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Surface(
+                                            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                            shape = RoundedCornerShape(50),
+                                        ) {
+                                            Text(
+                                                text = fetchedCode,
+                                                style = MaterialTheme.typography.labelMedium.copy(
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontWeight = FontWeight.Bold
+                                                ),
+                                                modifier = Modifier.padding(
+                                                    horizontal = 12.dp, vertical = 4.dp
+                                                ),
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
                                     }
                                 }
 
@@ -405,7 +440,6 @@ fun UnifiedJoinDialog(
                                         Modifier.padding(16.dp),
                                         verticalArrangement = Arrangement.spacedBy(12.dp)
                                     ) {
-                                        // ⭐ Row 1: Host Name (0.6f) & Status (0.4f)
                                         Row(
                                             Modifier.fillMaxWidth(),
                                             horizontalArrangement = Arrangement.SpaceBetween
@@ -477,7 +511,7 @@ fun UnifiedJoinDialog(
                                             val isFull = maxLimit in 1..userCount
                                             InfoStat(
                                                 Icons.Default.Group,
-                                                "Active Users",
+                                                "Joined Users",
                                                 "$userCount / ${if (maxLimit == 0) "∞" else maxLimit}",
                                                 Modifier.weight(0.6f),
                                                 if (isFull) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
@@ -498,10 +532,10 @@ fun UnifiedJoinDialog(
                                 ) {
                                     OutlinedButton(
                                         onClick = {
-                                            scope.launch {
-                                                pagerState.animateScrollToPage(
-                                                    0
-                                                )
+                                            if (isFromLink) {
+                                                onDismiss()
+                                            } else {
+                                                scope.launch { pagerState.animateScrollToPage(0) }
                                             }
                                         },
                                         modifier = Modifier
@@ -513,11 +547,12 @@ fun UnifiedJoinDialog(
                                         )
                                     ) {
                                         Icon(
-                                            Icons.AutoMirrored.Filled.ArrowBack, null,
+                                            if (isFromLink) Icons.Default.Close else Icons.AutoMirrored.Filled.ArrowBack,
+                                            null,
                                             modifier = Modifier.size(18.dp)
                                         )
                                         Spacer(Modifier.width(8.dp))
-                                        Text("Back")
+                                        Text(if (isFromLink) "Cancel" else "Back")
                                     }
 
                                     Button(

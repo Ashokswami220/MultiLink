@@ -65,13 +65,11 @@ fun HomeScreen(
     var showCreateDialog by rememberSaveable { mutableStateOf(false) }
     var showJoinDialog by rememberSaveable { mutableStateOf(false) }
     var joinDialogInitCode by remember { mutableStateOf<String?>(null) }
-    var hasHandledDeepLink by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(initialJoinCode) {
-        if (initialJoinCode != null && !hasHandledDeepLink) {
+        if (initialJoinCode != null) {
             joinDialogInitCode = initialJoinCode
             showJoinDialog = true
-            hasHandledDeepLink = true
         }
     }
 
@@ -201,12 +199,7 @@ fun HomeScreen(
                         val isHost = session.hostId == currentUserId
 
                         val singleClick = rememberSingleClick {
-                            if (session.status == "Paused") {
-                                Toast.makeText(
-                                    context, "Session is paused by Host", Toast.LENGTH_SHORT
-                                )
-                                    .show()
-                            } else if (!isHost && !session.isUsersVisible) {
+                            if (!isHost && !session.isUsersVisible) {
                                 onRestrictedSessionClick()
                             } else {
                                 onSessionClick(session)

@@ -40,12 +40,14 @@ data class Viewer(
 fun UserScreen() {
     val context = LocalContext.current
 
-    // --- FAKE DATA ---
     val viewers = remember {
         listOf(
             Viewer("1", "Mom", "+91 98765 12345", "Since 9:00 AM", "Precise"),
             Viewer("2", "Rahul (Manager)", "+91 99887 77665", "Since 20 mins ago", "Approx"),
-            Viewer("3", "Unknown Device", "+91 00000 00000", "Active for 2 days", "Precise", isAlert = true),
+            Viewer(
+                "3", "Unknown Device", "+91 00000 00000", "Active for 2 days", "Precise",
+                isAlert = true
+            ),
             Viewer("4", "Priya Singh", "+91 11223 34455", "Just now", "Precise"),
             Viewer("5", "Dad", "+91 55667 77889", "Since 1h", "Approx")
         )
@@ -69,7 +71,8 @@ fun UserScreen() {
         item {
             EditProfileLinkCard(
                 onClick = {
-                    Toast.makeText(context, "Edit Profile Clicked", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Edit Profile Clicked", Toast.LENGTH_SHORT)
+                        .show()
                 }
             )
             Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.padding_medium)))
@@ -106,7 +109,9 @@ fun UserScreen() {
                 ) {
                     Text(
                         text = "${viewers.size} Active",
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Bold
+                        ),
                         color = MaterialTheme.colorScheme.onPrimaryContainer,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                     )
@@ -121,7 +126,10 @@ fun UserScreen() {
 
             // Logic for Rounded Corners
             val shape = when {
-                viewers.size == 1 -> RoundedCornerShape(dimensionResource(id = R.dimen.corner_standard))
+                viewers.size == 1 -> RoundedCornerShape(
+                    dimensionResource(id = R.dimen.corner_standard)
+                )
+
                 isFirst -> RoundedCornerShape(
                     topStart = dimensionResource(id = R.dimen.corner_standard),
                     topEnd = dimensionResource(id = R.dimen.corner_standard),
@@ -147,7 +155,8 @@ fun UserScreen() {
                         context,
                         "Stopped sharing with ${viewer.name}",
                         Toast.LENGTH_SHORT
-                    ).show()
+                    )
+                        .show()
                 }
             )
         }
@@ -165,7 +174,9 @@ fun EditProfileLinkCard(onClick: () -> Unit) {
             .padding(horizontal = dimensionResource(id = R.dimen.padding_large)),
         shape = RoundedCornerShape(dimensionResource(id = R.dimen.corner_standard)),
         // Change: Tertiary Colors
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer
+        ),
         elevation = CardDefaults.cardElevation(0.dp)
     ) {
         Row(
@@ -242,11 +253,15 @@ fun GhostModeCard(isChecked: Boolean, onCheckedChange: (Boolean) -> Unit) {
                 Column {
                     Text(
                         text = stringResource(id = R.string.label_ghost_mode),
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.SemiBold
+                        ),
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = if (isChecked) "Location hidden from everyone" else stringResource(id = R.string.desc_ghost_mode),
+                        text = if (isChecked) "Location hidden from everyone" else stringResource(
+                            id = R.string.desc_ghost_mode
+                        ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -281,7 +296,9 @@ fun ViewerCard(
             .padding(horizontal = dimensionResource(id = R.dimen.padding_large)),
         shape = shape,
         // Minimalist: Lighter background, smaller elevation
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+        ),
         elevation = CardDefaults.cardElevation(1.dp)
     ) {
         Row(
@@ -304,7 +321,9 @@ fun ViewerCard(
                     Box(contentAlignment = Alignment.Center) {
                         Text(
                             text = viewer.name.take(1),
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold
+                            ),
                             color = if (viewer.isAlert) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSecondaryContainer
                         )
                     }
@@ -315,7 +334,9 @@ fun ViewerCard(
                 Column {
                     Text(
                         text = viewer.name,
-                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                        style = MaterialTheme.typography.bodyLarge.copy(
+                            fontWeight = FontWeight.SemiBold
+                        ),
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     // Minimalist: Combined Status Line
@@ -330,7 +351,9 @@ fun ViewerCard(
             // RIGHT SIDE: Text Button "Stop"
             TextButton(
                 onClick = onStopClick,
-                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error
+                )
             ) {
                 Text(
                     text = "Stop",

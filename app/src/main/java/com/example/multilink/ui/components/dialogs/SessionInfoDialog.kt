@@ -21,9 +21,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.platform.toClipEntry
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -37,6 +38,11 @@ import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.delay
 import java.util.concurrent.TimeUnit
 import androidx.core.net.toUri
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import kotlinx.coroutines.launch
+
+private val hostProfileCache = mutableMapOf<String, Map<String, String>>()
 
 @Composable
 fun SessionInfoDialog(
@@ -45,7 +51,8 @@ fun SessionInfoDialog(
 ) {
     val context = LocalContext.current
     val repository = remember { RealtimeRepository() }
-    val clipboardManager = LocalClipboardManager.current
+    val clipboard = LocalClipboard.current
+    val scope = rememberCoroutineScope()
 
     val currentUserId = remember { FirebaseAuth.getInstance().currentUser?.uid ?: "" }
     val isAdmin = session.hostId == currentUserId
@@ -54,18 +61,28 @@ fun SessionInfoDialog(
     // --- STATE ---
     var hostEmail by rememberSaveable { mutableStateOf("Loading...") }
     var hostPhone by rememberSaveable { mutableStateOf("Loading...") }
+    var hostPhotoUrl by rememberSaveable { mutableStateOf<String?>(null) }
     var timeLeftString by remember { mutableStateOf("...") }
     var isExpired by remember { mutableStateOf(false) }
 
     // Fetch Host Info
     LaunchedEffect(session.hostId) {
-        val details = repository.getGlobalUserProfile(session.hostId)
-        if (details != null) {
+        if (hostProfileCache.containsKey(session.hostId)) {
+            val details = hostProfileCache[session.hostId]!!
             hostPhone = details["phone"]?.takeIf { it.isNotEmpty() } ?: "Not Shared"
             hostEmail = details["email"]?.takeIf { it.isNotEmpty() } ?: "Not Shared"
+            hostPhotoUrl = details["photoUrl"]?.takeIf { it.isNotEmpty() }
         } else {
-            hostPhone = "Unknown"
-            hostEmail = "Unknown"
+            val details = repository.getGlobalUserProfile(session.hostId)
+            if (details != null) {
+                hostProfileCache[session.hostId] = details // Save to cache for next time
+                hostPhone = details["phone"]?.takeIf { it.isNotEmpty() } ?: "Not Shared"
+                hostEmail = details["email"]?.takeIf { it.isNotEmpty() } ?: "Not Shared"
+                hostPhotoUrl = details["photoUrl"]?.takeIf { it.isNotEmpty() }
+            } else {
+                hostPhone = "Unknown"
+                hostEmail = "Unknown"
+            }
         }
     }
 
@@ -98,14 +115,12 @@ fun SessionInfoDialog(
                 .show()
             return
         }
-        // geo:lat,lng?q=lat,lng(Label) ensures marker drops exactly at coord
         val uri = "geo:$lat,$lng?q=$lat,$lng(${Uri.encode(label)})".toUri()
         val intent = Intent(Intent.ACTION_VIEW, uri)
         intent.setPackage("com.google.android.apps.maps")
         try {
             context.startActivity(intent)
         } catch (_: Exception) {
-            // Fallback to browser
             val webIntent = Intent(Intent.ACTION_VIEW, uri)
             context.startActivity(webIntent)
         }
@@ -115,17 +130,18 @@ fun SessionInfoDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
+        // ⭐ CHANGED: More squarish, darker overall theme wrapper
         Card(
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            elevation = CardDefaults.cardElevation(8.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
             modifier = Modifier
-                .fillMaxWidth(0.95f)
-                .padding(16.dp)
+                .fillMaxWidth(0.92f)
+                .padding(vertical = 16.dp)
         ) {
             Column(
                 modifier = Modifier
-                    .padding(20.dp)
+                    .padding(24.dp)
                     .verticalScroll(rememberScrollState())
             ) {
                 // --- 1. HEADER (Title + Timer) ---
@@ -136,20 +152,23 @@ fun SessionInfoDialog(
                 ) {
                     Text(
                         text = session.title,
-                        style = MaterialTheme.typography.titleLarge.copy(
-                            fontWeight = FontWeight.Bold
+                        style = MaterialTheme.typography.headlineSmall.copy( // ⭐ CHANGED: Larger, bolder title
+                            fontWeight = FontWeight.ExtraBold
                         ),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
+                        color = MaterialTheme.colorScheme.onSurface
                     )
 
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
 
-                    // Timer Chip
+                    // ⭐ CHANGED: Sleek Timer Chip
                     Surface(
-                        color = if (isExpired) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer,
-                        shape = RoundedCornerShape(50),
+                        color = if (isExpired) MaterialTheme.colorScheme.errorContainer.copy(
+                            alpha = 0.8f
+                        ) else MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f),
+                        shape = RoundedCornerShape(12.dp), // Squarish pill
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -159,51 +178,59 @@ fun SessionInfoDialog(
                                 if (isExpired) Icons.Default.Warning else Icons.Outlined.Timer,
                                 null,
                                 modifier = Modifier.size(14.dp),
-                                tint = if (isExpired) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer
+                                tint = if (isExpired) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
                                 text = timeLeftString,
-                                style = MaterialTheme.typography.labelSmall.copy(
+                                style = MaterialTheme.typography.labelMedium.copy(
                                     fontWeight = FontWeight.Bold
                                 ),
-                                color = if (isExpired) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer
+                                color = if (isExpired) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(28.dp))
 
                 // --- 2. JOIN CODE (If applicable) ---
                 if (shouldShowCode && session.joinCode.isNotEmpty()) {
-                    Box(
+                    // ⭐ CHANGED: Used SurfaceContainerHigh to create the distinct dark box from the screenshot
+                    Surface(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                            .clip(RoundedCornerShape(16.dp))
                             .clickable {
-                                clipboardManager.setText(AnnotatedString(session.joinCode))
-                                Toast.makeText(context, "Copied!", Toast.LENGTH_SHORT)
-                                    .show()
-                            }
-                            .padding(12.dp)
+                                scope.launch {
+                                    val clipData = android.content.ClipData.newPlainText(
+                                        "Join Code", session.joinCode
+                                    )
+                                    clipboard.setClipEntry(clipData.toClipEntry())
+                                    Toast.makeText(context, "Copied!", Toast.LENGTH_SHORT)
+                                        .show()
+                                }
+                            },
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        shape = RoundedCornerShape(16.dp)
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween,
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.padding(16.dp)
                         ) {
                             Column {
                                 Text(
                                     text = "JOIN CODE",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    fontWeight = FontWeight.Bold
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.SemiBold
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                                Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = session.joinCode,
-                                    style = MaterialTheme.typography.headlineSmall.copy(
+                                    style = MaterialTheme.typography.titleLarge.copy(
                                         fontFamily = FontFamily.Monospace,
                                         fontWeight = FontWeight.Bold,
                                         letterSpacing = 2.sp
@@ -212,62 +239,74 @@ fun SessionInfoDialog(
                                 )
                                 if (!session.isSharingAllowed && isAdmin) {
                                     Text(
-                                        "Visible only to Admin",
+                                        text = "Visible only to Admin",
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.error
+                                        color = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.padding(top = 4.dp)
                                     )
                                 }
                             }
-                            IconButton(onClick = {
-                                clipboardManager.setText(AnnotatedString(session.joinCode))
-                                Toast.makeText(context, "Copied!", Toast.LENGTH_SHORT)
-                                    .show()
-                            }) {
-                                Icon(
-                                    Icons.Default.ContentCopy, "Copy",
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                            }
+                            Icon(
+                                imageVector = Icons.Outlined.ContentCopy,
+                                contentDescription = "Copy",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(24.dp)
+                            )
                         }
                     }
-                    Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(28.dp))
                 }
 
-                // --- 3. HOST DETAILS (Redesigned: Clean Card) ---
+                // --- 3. HOST DETAILS ---
+                // ⭐ CHANGED: Clean section header
                 Text(
                     text = "HOST DETAILS",
-                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.outline
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = FontWeight.Bold, letterSpacing = 1.sp
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainerLow,
-                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow, // Creates subtle contrast
+                    shape = RoundedCornerShape(16.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
+                    Column(modifier = Modifier.padding(16.dp)) {
                         // Top Row: Avatar + Name
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Surface(
                                 shape = CircleShape,
                                 color = MaterialTheme.colorScheme.primaryContainer,
-                                modifier = Modifier.size(32.dp)
+                                modifier = Modifier.size(36.dp)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        Icons.Default.Person,
-                                        null,
-                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                        modifier = Modifier.size(18.dp)
-                                    )
+                                    if (hostPhotoUrl != null) {
+                                        AsyncImage(
+                                            model = ImageRequest.Builder(LocalContext.current)
+                                                .data(hostPhotoUrl)
+                                                .crossfade(true)
+                                                .build(),
+                                            contentDescription = "Host Photo",
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    } else {
+                                        Icon(
+                                            Icons.Default.Person,
+                                            null,
+                                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
                                 }
                             }
-                            Spacer(modifier = Modifier.width(10.dp))
+                            Spacer(modifier = Modifier.width(12.dp))
                             Text(
                                 text = session.hostName.ifEmpty { "Unknown Host" },
                                 style = MaterialTheme.typography.titleMedium.copy(
-                                    fontWeight = FontWeight.SemiBold
+                                    fontWeight = FontWeight.Bold
                                 ),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
@@ -275,34 +314,36 @@ fun SessionInfoDialog(
 
                         // Divider
                         HorizontalDivider(
-                            modifier = Modifier.padding(vertical = 10.dp),
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                            modifier = Modifier.padding(vertical = 14.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
                         )
 
-                        // Bottom Row: Contact Info
+                        // Bottom Row: Contact Info (Cleaner Icons)
                         ContactItem(Icons.Outlined.Phone, hostPhone)
-                        Spacer(modifier = Modifier.height(6.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
                         ContactItem(Icons.Outlined.Email, hostEmail)
                     }
                 }
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(28.dp))
 
-                // --- 4. ROUTE INFO (Vertical + Navigate) ---
+                // --- 4. ROUTE INFO (Visual Timeline) ---
                 Text(
                     text = "ROUTE INFO",
-                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.outline
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = FontWeight.Bold, letterSpacing = 1.sp
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
                 Column(modifier = Modifier.fillMaxWidth()) {
                     // Start Location
                     LocationItem(
-                        icon = Icons.Default.TripOrigin,
+                        icon = Icons.Outlined.RadioButtonUnchecked, // ⭐ CHANGED: Hollow circle for start
                         label = "Start Point",
                         location = session.fromLocation.ifEmpty { "Not selected by host" },
-                        color = MaterialTheme.colorScheme.primary,
+                        iconColor = MaterialTheme.colorScheme.primary,
                         onNavigate = {
                             openMap(
                                 session.startLat ?: 0.0, session.startLng ?: 0.0,
@@ -311,21 +352,21 @@ fun SessionInfoDialog(
                         }
                     )
 
-                    // Vertical Dotted Connector (Visual)
+                    // Vertical Connector Line
                     Box(
                         modifier = Modifier
-                            .padding(start = 11.dp) // Align with icon center
-                            .height(16.dp)
-                            .width(1.dp)
-                            .background(MaterialTheme.colorScheme.outlineVariant)
+                            .padding(start = 11.dp) // Aligns perfectly with 24.dp icon
+                            .height(24.dp)
+                            .width(2.dp)
+                            .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                     )
 
                     // End Location
                     LocationItem(
-                        icon = Icons.Default.Place,
+                        icon = Icons.Default.Place, // Solid Pin for end
                         label = "Destination",
                         location = session.toLocation.ifEmpty { "Not selected by host" },
-                        color = MaterialTheme.colorScheme.error,
+                        iconColor = MaterialTheme.colorScheme.error,
                         onNavigate = {
                             openMap(
                                 session.endLat ?: 0.0, session.endLng ?: 0.0, session.toLocation
@@ -334,17 +375,25 @@ fun SessionInfoDialog(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(36.dp))
 
                 // --- 5. CLOSE BUTTON ---
                 Button(
                     onClick = onDismiss,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(48.dp),
-                    shape = RoundedCornerShape(12.dp)
+                        .height(52.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
                 ) {
-                    Text("Close")
+                    Text(
+                        "Close", style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold
+                        )
+                    )
                 }
             }
         }
@@ -356,13 +405,13 @@ fun ContactItem(icon: ImageVector, text: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Icon(
             icon, null,
-            modifier = Modifier.size(14.dp),
+            modifier = Modifier.size(16.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        Spacer(modifier = Modifier.width(8.dp))
+        Spacer(modifier = Modifier.width(12.dp))
         Text(
             text = text,
-            style = MaterialTheme.typography.bodySmall,
+            style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
@@ -373,57 +422,43 @@ fun LocationItem(
     icon: ImageVector,
     label: String,
     location: String,
-    color: Color,
+    iconColor: Color,
     onNavigate: () -> Unit
 ) {
     val isLocationValid =
         location.isNotEmpty() && !location.contains("not selected", ignoreCase = true)
 
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(
+                enabled = isLocationValid
+            ) { onNavigate() }, // ⭐ CHANGED: Made the whole row clickable instead of a button
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        // Icon and Text
-        Row(
-            modifier = Modifier.weight(1f),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                icon, null,
-                modifier = Modifier.size(22.dp),
-                tint = color
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(24.dp),
+            tint = iconColor
+        )
+        Spacer(modifier = Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(modifier = Modifier.width(12.dp))
-            Column {
-                Text(label, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
-                Text(
-                    text = location,
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontWeight = FontWeight.Medium
-                    ),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-        }
-
-        // Navigate Button (Google Maps)
-        if (isLocationValid) {
-            IconButton(
-                onClick = onNavigate,
-                colors = IconButtonDefaults.iconButtonColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = location,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontWeight = FontWeight.SemiBold
                 ),
-                modifier = Modifier.size(36.dp)
-            ) {
-                Icon(
-                    Icons.Outlined.Directions,
-                    contentDescription = "Navigate",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }

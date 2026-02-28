@@ -4,11 +4,11 @@ import com.example.multilink.model.UserProfile
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.FirebaseDatabase
 import kotlinx.coroutines.tasks.await
+import java.net.URLEncoder
 
 class AuthRepository {
     private val auth: FirebaseAuth = FirebaseAuth.getInstance()
 
-    // Points to "users" node
     private val db = FirebaseDatabase.getInstance()
         .getReference("users")
 
@@ -38,7 +38,13 @@ class AuthRepository {
     suspend fun saveUserProfile(name: String, phone: String) {
         val uid = auth.currentUser?.uid ?: return
         val email = auth.currentUser?.email ?: ""
-        val photoUrl = auth.currentUser?.photoUrl?.toString() ?: ""
+        var photoUrl = auth.currentUser?.photoUrl?.toString() ?: ""
+
+        if (photoUrl.isNullOrEmpty()) {
+            val encodedName = URLEncoder.encode(name, "UTF-8")
+            photoUrl =
+                "https://ui-avatars.com/api/?name=$encodedName&background=random&color=fff&size=256"
+        }
 
         val userProfile = UserProfile(
             id = uid,
@@ -49,7 +55,6 @@ class AuthRepository {
             createdAt = System.currentTimeMillis()
         )
 
-        // Save to users/{uid}/profile
         db.child(uid)
             .child("profile")
             .setValue(userProfile)

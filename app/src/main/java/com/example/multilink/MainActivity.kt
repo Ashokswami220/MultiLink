@@ -10,10 +10,15 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import com.example.multilink.ui.navigation.MultiLinkNavApp
 import com.example.multilink.ui.theme.MultiLinkTheme
-import com.google.firebase.database.FirebaseDatabase
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import java.security.MessageDigest
 
 class MainActivity : ComponentActivity() {
@@ -32,10 +37,11 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestMultiplePermissions()
     ) { _ -> }
 
+    private val _deepLinkCode = MutableStateFlow<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // ⭐ FIXED DEBUG BLOCK ⭐
         try {
             // Flag to get signatures (signatures is deprecated but works for debugging)
             val flags = PackageManager.GET_SIGNATURES
@@ -48,7 +54,7 @@ class MainActivity : ComponentActivity() {
                 packageManager.getPackageInfo(packageName, flags)
             }
 
-            // ⭐ FIX: Check if signatures is not null before looping
+            // FIX: Check if signatures is not null before looping
             @Suppress("DEPRECATION")
             val signatures = info.signatures
 
@@ -78,16 +84,11 @@ class MainActivity : ComponentActivity() {
             permissionLauncher.launch(requiredPermissions.toTypedArray())
         }
 
-        // Deep Link Handling
-        var initialJoinCode: String? = null
-        val data: Uri? = intent?.data
-
-        if (data != null && data.scheme == "https" && data.host == "multilink-aa2228.web.app" && data.pathSegments.size > 1) {
-            initialJoinCode = data.pathSegments[1]
-        }
+        handleDeepLink(intent)
 
         setContent {
             MultiLinkTheme {
+                val initialJoinCode by _deepLinkCode.collectAsState()
                 MultiLinkNavApp(startJoinCode = initialJoinCode)
             }
         }
@@ -96,6 +97,37 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        handleDeepLink(intent)
+    }
+
+    private fun handleDeepLink(intent: Intent?) {
+        val data: Uri? = intent?.data
+        if (data != null && data.scheme == "https" && data.host == "multilink-aa2228.web.app" && data.pathSegments.size > 1) {
+            val path = data.pathSegments[0]
+            val param = data.pathSegments[1]
+
+            if (path == "join") {
+                _deepLinkCode.value = param
+                clearIntentState(intent)
+            } else if (path == "invite") {
+                try {
+                    val decodedBytes =
+                        android.util.Base64.decode(param, android.util.Base64.URL_SAFE)
+                    _deepLinkCode.value = String(decodedBytes)
+                    clearIntentState(intent)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+    }
+
+    private fun clearIntentState(intent: Intent?) {
+        lifecycleScope.launch {
+            delay(1000)
+            _deepLinkCode.value = null
+            intent?.data = null
+        }
     }
 
     private fun hasPermissions(): Boolean {

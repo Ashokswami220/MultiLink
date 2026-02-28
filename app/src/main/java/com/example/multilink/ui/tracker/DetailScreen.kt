@@ -35,13 +35,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.dimensionResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.multilink.BuildConfig
+import com.example.multilink.R
 import com.example.multilink.model.SessionParticipant
 import com.example.multilink.repo.RealtimeRepository
 import com.example.multilink.repo.RouteRepository
@@ -53,7 +55,6 @@ import com.example.multilink.ui.components.SessionActionHandler
 import com.example.multilink.ui.components.SessionControlBar
 import com.example.multilink.ui.components.SessionMapContent
 import com.example.multilink.ui.components.dialogs.SessionInfoDialog
-import com.example.multilink.ui.theme.MultiLinkTheme
 import com.example.multilink.ui.viewmodel.SessionViewModel
 import com.example.multilink.ui.viewmodel.SessionViewModelFactory
 import com.example.multilink.utils.LocationUtils.calculateDistance
@@ -62,11 +63,22 @@ import com.google.android.gms.location.Priority
 import com.mapbox.geojson.Point
 import com.mapbox.maps.CameraOptions
 import com.mapbox.maps.extension.compose.animation.viewport.rememberMapViewportState
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import androidx.compose.ui.layout.ContentScale
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DetailScreen(
-    sessionId: String, userId: String, onBackClick: () -> Unit,
+    sessionId: String,
+    userId: String,
+    onBackClick: () -> Unit,
+    onSessionEnded: () -> Unit,
+    onSessionPaused: () -> Unit
 ) {
     val viewModel: SessionViewModel = viewModel(factory = SessionViewModelFactory(sessionId))
     val uiState by viewModel.uiState.collectAsState()
@@ -77,11 +89,42 @@ fun DetailScreen(
     val routeRepository = remember { RouteRepository(token) }
     val scope = rememberCoroutineScope()
 
-    var showInfoDialog by remember { mutableStateOf(false) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, sessionId, userId) {
+        var isWatching = false
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_START) {
+                // Screen is visible/foregrounded
+                if (!isWatching) {
+                    repository.incrementUserWatchers(sessionId, userId)
+                    isWatching = true
+                }
+            } else if (event == Lifecycle.Event.ON_STOP) {
+                // Screen is hidden/backgrounded
+                if (isWatching) {
+                    repository.decrementUserWatchers(sessionId, userId)
+                    isWatching = false
+                }
+            }
+        }
+
+        lifecycleOwner.lifecycle.addObserver(observer)
+
+        onDispose {
+            // Safety cleanup when composable is destroyed
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            if (isWatching) {
+                repository.decrementUserWatchers(sessionId, userId)
+                isWatching = false
+            }
+        }
+    }
+
+    val (showInfoDialog, setShowInfoDialog) = remember { mutableStateOf(false) }
     if (showInfoDialog && uiState.sessionData != null) {
         SessionInfoDialog(
             session = uiState.sessionData!!,
-            onDismiss = { showInfoDialog = false }
+            onDismiss = { setShowInfoDialog(false) }
         )
     }
 
@@ -89,7 +132,7 @@ fun DetailScreen(
 
     val user = remember(uiState.participants, userId) {
         uiState.participants.find { it.id == userId }
-            ?: SessionParticipant(id = userId, name = "Loading...")
+            ?: SessionParticipant(id = userId, name = context.getString(R.string.state_loading))
     }
 
     val isUserInSession = remember(uiState.participants, userId) {
@@ -101,7 +144,6 @@ fun DetailScreen(
     var isFullScreen by remember { mutableStateOf(false) }
     BackHandler(enabled = isFullScreen) { isFullScreen = false }
 
-    // Static Data (Phone/Photo) - Fetched once
     var userPhone by remember { mutableStateOf("") }
     var userPhoto by remember { mutableStateOf<String?>(null) }
     var realRoutePoints by remember { mutableStateOf<List<Point>>(emptyList()) }
@@ -116,22 +158,43 @@ fun DetailScreen(
     }
 
     // --- NAVIGATION LOGIC ---
+    var isNavigatingOut by remember { mutableStateOf(false) }
 
-    // A. Session Ended
-    LaunchedEffect(uiState.isSessionActive) {
-        if (!uiState.isSessionActive && !uiState.isLoading) {
-            Toast.makeText(context, "Session Ended", Toast.LENGTH_SHORT)
-                .show()
-            onBackClick()
-        }
-    }
+    LaunchedEffect(
+        uiState.isSessionActive, uiState.isRemoved, isUserInSession, uiState.isLoading,
+        uiState.sessionData?.status
+    ) {
+        if (uiState.isLoading || isNavigatingOut) return@LaunchedEffect
 
-    // B. User Left (Automatic) vs Removed (Manual)
-    LaunchedEffect(uiState.isLoading, isUserInSession) {
-        // Only pop if user is gone AND we didn't initiate the removal ourselves
-        if (!uiState.isLoading && !isUserInSession && !isRemoving) {
-            Toast.makeText(context, "User left the session", Toast.LENGTH_SHORT)
+        val isPaused = uiState.sessionData?.status == "Paused"
+        val isAdmin = uiState.isCurrentUserAdmin
+
+        if (!uiState.isSessionActive) {
+            isNavigatingOut = true
+            Toast.makeText(
+                context, context.getString(R.string.msg_session_ended), Toast.LENGTH_SHORT
+            )
                 .show()
+            onSessionEnded()
+        } else if (uiState.isRemoved) {
+            kotlinx.coroutines.delay(100)
+            isNavigatingOut = true
+            Toast.makeText(context, "You were removed by the host", Toast.LENGTH_LONG)
+                .show()
+            onSessionEnded()
+        } else if (isPaused && !isAdmin) {
+            // Kick non-admins, but keep service alive
+            isNavigatingOut = true
+            Toast.makeText(context, "Session paused by Host", Toast.LENGTH_LONG)
+                .show()
+            onSessionPaused()
+        } else if (uiState.participants.isNotEmpty() && !isUserInSession && !isRemoving) {
+            isNavigatingOut = true
+            Toast.makeText(
+                context, context.getString(R.string.msg_user_left_session), Toast.LENGTH_SHORT
+            )
+                .show()
+            // Leaves us on the Live Tracking Map if the target user drops
             onBackClick()
         }
     }
@@ -201,16 +264,27 @@ fun DetailScreen(
         )
     }
 
-    val userSpeed = getattr(user, "speed", 0f)
+    val userSpeed = user.speed
     val speedKmh = (userSpeed * 3.6).toInt()
 
     val timeLeft = remember(distToEnd, speedKmh) {
-        if (speedKmh > 1 && distToEnd != "...") {
+        if (speedKmh > 1 && distToEnd != "..." && distToEnd.contains(" ")) {
             try {
-                val distVal = distToEnd.split(" ")[0].toDoubleOrNull() ?: 0.0
-                val hours = distVal / speedKmh
+                val parts = distToEnd.split(" ")
+                val distVal = parts[0].toDoubleOrNull() ?: 0.0
+                val isKm = parts[1] == "km"
+
+                // Convert to KM so division by KM/H works properly
+                val distKm = if (isKm) distVal else distVal / 1000.0
+
+                val hours = distKm / speedKmh
                 val minutes = (hours * 60).toInt()
-                if (minutes > 60) "${minutes / 60} hr ${minutes % 60} min" else "$minutes min"
+
+                if (minutes > 60) {
+                    context.getString(R.string.format_time_hr_min, minutes / 60, minutes % 60)
+                } else {
+                    context.getString(R.string.format_time_min, minutes)
+                }
             } catch (_: Exception) {
                 "--"
             }
@@ -221,7 +295,9 @@ fun DetailScreen(
 
     val configuration = LocalConfiguration.current
     val basePeekHeight =
-        if (configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) 110.dp else 270.dp
+        if (configuration.orientation == Configuration.ORIENTATION_LANDSCAPE)
+            dimensionResource(R.dimen.peek_height_landscape)
+        else dimensionResource(R.dimen.peek_height_portrait)
 
     val animatedPeekHeight by animateDpAsState(
         targetValue = if (isFullScreen) 0.dp else basePeekHeight,
@@ -237,7 +313,10 @@ fun DetailScreen(
         BottomSheetScaffold(
             scaffoldState = scaffoldState,
             sheetPeekHeight = animatedPeekHeight,
-            sheetShape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+            sheetShape = RoundedCornerShape(
+                topStart = dimensionResource(R.dimen.corner_dialog),
+                topEnd = dimensionResource(R.dimen.corner_dialog)
+            ),
             sheetContainerColor = MaterialTheme.colorScheme.surface,
             containerColor = Color.Transparent,
             sheetDragHandle = null,
@@ -245,19 +324,21 @@ fun DetailScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 24.dp)
+                        .padding(horizontal = dimensionResource(R.dimen.padding_extra_large))
                         .navigationBarsPadding()
                 ) {
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(dimensionResource(R.dimen.padding_medium)))
                     Box(
                         modifier = Modifier
-                            .width(40.dp)
-                            .height(4.dp)
+                            .width(dimensionResource(R.dimen.drag_handle_width))
+                            .height(dimensionResource(R.dimen.drag_handle_height))
                             .clip(CircleShape)
                             .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                             .align(Alignment.CenterHorizontally)
                     )
-                    Spacer(modifier = Modifier.height(24.dp))
+                    Spacer(
+                        modifier = Modifier.height(dimensionResource(R.dimen.padding_extra_large))
+                    )
 
                     // Header Row
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -265,27 +346,49 @@ fun DetailScreen(
                             Surface(
                                 shape = CircleShape,
                                 color = MaterialTheme.colorScheme.primaryContainer,
-                                modifier = Modifier.size(70.dp)
+                                modifier = Modifier.size(
+                                    dimensionResource(R.dimen.profile_image_large)
+                                )
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        Icons.Default.Person, null,
-                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                        modifier = Modifier.size(35.dp)
-                                    )
+                                    if (userPhoto != null) {
+                                        AsyncImage(
+                                            model = ImageRequest.Builder(LocalContext.current)
+                                                .data(userPhoto)
+                                                .crossfade(true)
+                                                .build(),
+                                            contentDescription = "User Photo",
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    } else {
+                                        // Fallback to the default person icon if no photo exists
+                                        Icon(
+                                            Icons.Default.Person, null,
+                                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            modifier = Modifier.size(
+                                                dimensionResource(R.dimen.icon_large)
+                                            )
+                                        )
+                                    }
                                 }
                             }
                             Box(
                                 modifier = Modifier
-                                    .size(16.dp)
+                                    .size(dimensionResource(R.dimen.status_dot_large))
                                     .clip(CircleShape)
                                     .background(
                                         if (user.status == "Online") Color.Green else Color.Gray
                                     )
-                                    .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)
+                                    .border(
+                                        dimensionResource(R.dimen.stroke_width_standard),
+                                        MaterialTheme.colorScheme.surface, CircleShape
+                                    )
                             )
                         }
-                        Spacer(modifier = Modifier.width(16.dp))
+                        Spacer(
+                            modifier = Modifier.width(dimensionResource(R.dimen.padding_standard))
+                        )
                         Column {
                             Text(
                                 user.name, style = MaterialTheme.typography.headlineSmall.copy(
@@ -293,14 +396,18 @@ fun DetailScreen(
                                 )
                             )
                             Text(
-                                userPhone.ifEmpty { "Private / No Contact" },
+                                userPhone.ifEmpty {
+                                    stringResource(
+                                        R.string.placeholder_no_contact
+                                    )
+                                },
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(32.dp))
+                    Spacer(modifier = Modifier.height(dimensionResource(R.dimen.padding_huge)))
 
                     // Actions
                     Row(
@@ -308,7 +415,7 @@ fun DetailScreen(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         ActionItem(
-                            Icons.Default.Call, "Call",
+                            Icons.Default.Call, stringResource(R.string.action_call),
                             MaterialTheme.colorScheme.secondaryContainer,
                             MaterialTheme.colorScheme.onSecondaryContainer
                         ) {
@@ -316,12 +423,14 @@ fun DetailScreen(
                                 Intent(Intent.ACTION_DIAL, "tel:$userPhone".toUri())
                             )
                             else Toast.makeText(
-                                context, "No phone number available", Toast.LENGTH_SHORT
+                                context, context.getString(R.string.error_no_phone),
+                                Toast.LENGTH_SHORT
                             )
                                 .show()
                         }
                         ActionItem(
-                            Icons.AutoMirrored.Filled.Message, "Message",
+                            Icons.AutoMirrored.Filled.Message,
+                            stringResource(R.string.action_message),
                             MaterialTheme.colorScheme.secondaryContainer,
                             MaterialTheme.colorScheme.onSecondaryContainer
                         ) {
@@ -329,21 +438,25 @@ fun DetailScreen(
                                 Intent(Intent.ACTION_VIEW, "sms:$userPhone".toUri())
                             )
                             else Toast.makeText(
-                                context, "No phone number available", Toast.LENGTH_SHORT
+                                context, context.getString(R.string.error_no_phone),
+                                Toast.LENGTH_SHORT
                             )
                                 .show()
                         }
                         ActionItem(
-                            Icons.Default.Whatsapp, "WhatsApp", Color(0xFFE0F2F1), Color(0xFF00695C)
+                            Icons.Default.Whatsapp, stringResource(R.string.action_whatsapp),
+                            Color(0xFFE0F2F1), Color(0xFF00695C)
                         ) {
                             openWhatsApp(context, userPhone)
                         }
                         ActionItem(
-                            Icons.Default.Directions, "Navigate", MaterialTheme.colorScheme.primary,
+                            Icons.Default.Directions, stringResource(R.string.action_navigate),
+                            MaterialTheme.colorScheme.primary,
                             MaterialTheme.colorScheme.onPrimary
                         ) {
-                            targetUserLocation?.let {
-                                val uri = "google.navigation:q=${it.latitude()},${it.longitude()}"
+                            if (uiState.endPoint != null) {
+                                val uri =
+                                    "google.navigation:q=${uiState.endPoint!!.latitude()},${uiState.endPoint!!.longitude()}"
                                 val intent = Intent(Intent.ACTION_VIEW, uri.toUri()).setPackage(
                                     "com.google.android.apps.maps"
                                 )
@@ -351,59 +464,91 @@ fun DetailScreen(
                                     context.startActivity(intent)
                                 } catch (_: Exception) {
                                     Toast.makeText(
-                                        context, "Maps not installed", Toast.LENGTH_SHORT
+                                        context, context.getString(
+                                            R.string.error_maps_not_installed
+                                        ), Toast.LENGTH_SHORT
                                     )
                                         .show()
                                 }
+                            } else {
+                                Toast.makeText(
+                                    context, context.getString(R.string.error_dest_not_set),
+                                    Toast.LENGTH_SHORT
+                                )
+                                    .show()
                             }
                         }
                     }
 
                     HorizontalDivider(
-                        modifier = Modifier.padding(vertical = 24.dp),
+                        modifier = Modifier.padding(
+                            vertical = dimensionResource(R.dimen.padding_extra_large)
+                        ),
                         color = MaterialTheme.colorScheme.outlineVariant.copy(
                             alpha = 0.2f
                         )
                     )
 
                     // Info Grid
-                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(
+                            dimensionResource(R.dimen.padding_standard)
+                        )
+                    ) {
                         Row(modifier = Modifier.fillMaxWidth()) {
                             InfoCard(
-                                Modifier.weight(1f), Icons.Default.NearMe, "Distance", distFromMe,
-                                "From You", MaterialTheme.colorScheme.primary
+                                Modifier.weight(1f), Icons.Default.NearMe,
+                                stringResource(R.string.label_distance), distFromMe,
+                                stringResource(R.string.label_from_you),
+                                MaterialTheme.colorScheme.primary
                             )
-                            Spacer(modifier = Modifier.width(12.dp))
+                            Spacer(
+                                modifier = Modifier.width(dimensionResource(R.dimen.padding_medium))
+                            )
                             if (uiState.endPoint != null) {
                                 InfoCard(
                                     Modifier.weight(1f), Icons.Default.SportsScore,
-                                    "To Destination", distToEnd, "Remaining",
+                                    stringResource(R.string.label_to_destination), distToEnd,
+                                    stringResource(R.string.label_remaining),
                                     MaterialTheme.colorScheme.error
                                 )
                             } else {
                                 InfoCard(
-                                    Modifier.weight(1f), Icons.Default.LocationOff, "Destination",
-                                    "Not Selected", "By Host", MaterialTheme.colorScheme.secondary
+                                    Modifier.weight(1f), Icons.Default.LocationOff,
+                                    stringResource(R.string.label_destination),
+                                    stringResource(R.string.label_not_selected),
+                                    stringResource(R.string.label_by_host),
+                                    MaterialTheme.colorScheme.secondary
                                 )
                             }
                         }
                         // Row 3: Speed | Time (If moving/dest set)
                         Row(modifier = Modifier.fillMaxWidth()) {
                             InfoCard(
-                                Modifier.weight(1f), Icons.Outlined.Speed, "Speed",
-                                "$speedKmh km/h", if (speedKmh > 0) "Moving" else "Stopped",
+                                Modifier.weight(1f), Icons.Outlined.Speed,
+                                stringResource(R.string.label_speed),
+                                stringResource(R.string.format_speed_kmh, speedKmh),
+                                if (speedKmh > 0) stringResource(
+                                    R.string.label_moving
+                                ) else stringResource(R.string.label_stopped),
                                 MaterialTheme.colorScheme.secondary
                             )
-                            Spacer(modifier = Modifier.width(12.dp))
+                            Spacer(
+                                modifier = Modifier.width(dimensionResource(R.dimen.padding_medium))
+                            )
                             if (uiState.endPoint != null) {
                                 InfoCard(
-                                    Modifier.weight(1f), Icons.Outlined.Timer, "Est. Time To Dest",
-                                    timeLeft, "To Arrival", MaterialTheme.colorScheme.primary
+                                    Modifier.weight(1f), Icons.Outlined.Timer,
+                                    stringResource(R.string.label_est_time),
+                                    timeLeft, stringResource(R.string.label_to_arrival),
+                                    MaterialTheme.colorScheme.primary
                                 )
                             } else {
                                 InfoCard(
-                                    Modifier.weight(1f), Icons.Default.LocationOff, "Destination",
-                                    "No Time", "End Loc not selected",
+                                    Modifier.weight(1f), Icons.Default.LocationOff,
+                                    stringResource(R.string.label_destination),
+                                    stringResource(R.string.label_no_time),
+                                    stringResource(R.string.label_end_loc_not_selected),
                                     MaterialTheme.colorScheme.secondary
                                 )
                             }
@@ -413,19 +558,27 @@ fun DetailScreen(
                             InfoCard(
                                 Modifier.weight(1f),
                                 if (user.isCharging) Icons.Default.BatteryChargingFull else Icons.Default.BatteryStd,
-                                "Battery", "${user.batteryLevel}%",
-                                if (user.isCharging) "Charging" else "Normal",
+                                stringResource(R.string.label_battery), "${user.batteryLevel}%",
+                                if (user.isCharging) stringResource(
+                                    R.string.label_charging
+                                ) else stringResource(R.string.label_normal),
                                 if (user.batteryLevel < 20) Color.Red else MaterialTheme.colorScheme.tertiary
                             )
-                            Spacer(modifier = Modifier.width(12.dp))
+                            Spacer(
+                                modifier = Modifier.width(dimensionResource(R.dimen.padding_medium))
+                            )
                             InfoCard(
-                                Modifier.weight(1f), Icons.Default.Speed, "Status", user.status,
-                                "Activity", MaterialTheme.colorScheme.tertiary
+                                Modifier.weight(1f), Icons.Default.Speed,
+                                stringResource(R.string.label_status), user.status,
+                                stringResource(R.string.label_activity),
+                                MaterialTheme.colorScheme.tertiary
                             )
                         }
 
                     }
-                    Spacer(modifier = Modifier.height(150.dp))
+                    Spacer(
+                        modifier = Modifier.height(dimensionResource(R.dimen.detail_bottom_spacing))
+                    )
                 }
             }
         ) {
@@ -462,7 +615,9 @@ fun DetailScreen(
                             .fillMaxWidth()
                             .padding(
                                 top = WindowInsets.statusBars.asPaddingValues()
-                                    .calculateTopPadding() + 8.dp
+                                    .calculateTopPadding() + dimensionResource(
+                                    R.dimen.padding_small
+                                )
                             )
                     ) {
                         MapTopBar(
@@ -478,7 +633,8 @@ fun DetailScreen(
                                         .zoom(16.0)
                                         .build()
                                 ) else Toast.makeText(
-                                    context, "Start location not set", Toast.LENGTH_SHORT
+                                    context, context.getString(R.string.error_start_loc_not_set),
+                                    Toast.LENGTH_SHORT
                                 )
                                     .show()
                             },
@@ -489,7 +645,8 @@ fun DetailScreen(
                                         .zoom(16.0)
                                         .build()
                                 ) else Toast.makeText(
-                                    context, "Destination not set", Toast.LENGTH_SHORT
+                                    context, context.getString(R.string.error_dest_not_set),
+                                    Toast.LENGTH_SHORT
                                 )
                                     .show()
                             },
@@ -500,7 +657,7 @@ fun DetailScreen(
                                     onBackClick() // 2. Manual Pop
                                 }
                             },
-                            onInfoClick = { showInfoDialog = true }
+                            onInfoClick = { setShowInfoDialog(true) }
 
                         )
 
@@ -510,8 +667,13 @@ fun DetailScreen(
                             exit = fadeOut()
                         ) {
                             Column(
-                                modifier = Modifier.padding(start = 16.dp, top = 12.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp) // Vertical spacing
+                                modifier = Modifier.padding(
+                                    start = dimensionResource(R.dimen.padding_standard),
+                                    top = dimensionResource(R.dimen.padding_medium)
+                                ),
+                                verticalArrangement = Arrangement.spacedBy(
+                                    dimensionResource(R.dimen.padding_small)
+                                ) // Vertical spacing
                             ) {
                                 StatusChip(
                                     Icons.Default.SportsScore, distToEnd,
@@ -523,7 +685,8 @@ fun DetailScreen(
                                 )
                                 if (speedKmh > 0) {
                                     StatusChip(
-                                        Icons.Outlined.Speed, "$speedKmh km/h",
+                                        Icons.Outlined.Speed,
+                                        stringResource(R.string.format_speed_kmh, speedKmh),
                                         MaterialTheme.colorScheme.secondaryContainer
                                     )
                                 }
@@ -535,13 +698,24 @@ fun DetailScreen(
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
-                        .padding(bottom = animatedPeekHeight + 16.dp, end = 16.dp)
-                        .padding(bottom = if (isFullScreen) 32.dp else 0.dp)
+                        .padding(
+                            bottom = animatedPeekHeight + dimensionResource(
+                                R.dimen.padding_standard
+                            ),
+                            end = dimensionResource(R.dimen.padding_standard)
+                        )
+                        .padding(
+                            bottom = if (isFullScreen) dimensionResource(
+                                R.dimen.padding_huge
+                            ) else 0.dp
+                        )
                         .wrapContentWidth()
                 ) {
                     Row(
                         verticalAlignment = Alignment.Bottom,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        horizontalArrangement = Arrangement.spacedBy(
+                            dimensionResource(R.dimen.padding_medium)
+                        )
                     ) {
                         // 1. The Pill
                         SessionControlBar(
@@ -553,7 +727,8 @@ fun DetailScreen(
                                         .build()
                                 )
                                 else Toast.makeText(
-                                    context, "Start location not set", Toast.LENGTH_SHORT
+                                    context, context.getString(R.string.error_start_loc_not_set),
+                                    Toast.LENGTH_SHORT
                                 )
                                     .show()
                             },
@@ -565,7 +740,9 @@ fun DetailScreen(
                                         .build()
                                 )
                                 else Toast.makeText(
-                                    context, "User location not available", Toast.LENGTH_SHORT
+                                    context,
+                                    context.getString(R.string.error_user_loc_not_available),
+                                    Toast.LENGTH_SHORT
                                 )
                                     .show()
                             },
@@ -577,7 +754,8 @@ fun DetailScreen(
                                         .build()
                                 )
                                 else Toast.makeText(
-                                    context, "Destination not set", Toast.LENGTH_SHORT
+                                    context, context.getString(R.string.error_dest_not_set),
+                                    Toast.LENGTH_SHORT
                                 )
                                     .show()
                             }
@@ -589,11 +767,11 @@ fun DetailScreen(
                             containerColor = MaterialTheme.colorScheme.surface,
                             contentColor = MaterialTheme.colorScheme.onSurface,
                             shape = CircleShape,
-                            modifier = Modifier.size(48.dp)
+                            modifier = Modifier.size(dimensionResource(R.dimen.icon_box_size))
                         ) {
                             Icon(
                                 imageVector = if (isFullScreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                                contentDescription = "Toggle Full Screen"
+                                contentDescription = stringResource(R.string.cd_toggle_fullscreen)
                             )
                         }
 
@@ -627,35 +805,30 @@ fun DetailScreen(
     }
 }
 
-fun getattr(obj: Any, prop: String, default: Float): Float {
-    return try {
-        val field = obj::class.java.getDeclaredField(prop)
-        field.isAccessible = true
-        field.getFloat(obj)
-    } catch (_: Exception) {
-        default
-    }
-}
-
 @Composable
 fun StatusChip(icon: ImageVector, text: String, color: Color) {
     Surface(
         shape = CircleShape,
         color = color.copy(alpha = 0.9f),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.3f)),
-        shadowElevation = 2.dp
+        border = BorderStroke(
+            dimensionResource(R.dimen.divider_thickness), Color.White.copy(alpha = 0.3f)
+        ),
+        shadowElevation = dimensionResource(R.dimen.stroke_width_standard)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            modifier = Modifier.padding(
+                horizontal = dimensionResource(R.dimen.padding_small),
+                vertical = dimensionResource(R.dimen.padding_tiny)
+            ),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                modifier = Modifier.size(12.dp),
+                modifier = Modifier.size(dimensionResource(R.dimen.padding_medium)),
                 tint = MaterialTheme.colorScheme.onSurface
             )
-            Spacer(modifier = Modifier.width(4.dp))
+            Spacer(modifier = Modifier.width(dimensionResource(R.dimen.padding_tiny)))
             Text(
                 text = text,
                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
@@ -672,20 +845,20 @@ fun ActionItem(
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Surface(
             onClick = onClick,
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(dimensionResource(R.dimen.corner_card)),
             color = color,
-            modifier = Modifier.size(64.dp)
+            modifier = Modifier.size(dimensionResource(R.dimen.action_item_size))
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
                     imageVector = icon,
                     contentDescription = label,
                     tint = iconColor,
-                    modifier = Modifier.size(28.dp)
+                    modifier = Modifier.size(dimensionResource(R.dimen.icon_action))
                 )
             }
         }
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(dimensionResource(R.dimen.padding_small)))
         Text(
             text = label,
             style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
@@ -705,26 +878,29 @@ fun InfoCard(
 ) {
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(dimensionResource(R.dimen.corner_standard)),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+        border = BorderStroke(
+            dimensionResource(R.dimen.divider_thickness),
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+        )
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(dimensionResource(R.dimen.padding_standard))) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
                     tint = tint,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(dimensionResource(R.dimen.icon_medium))
                 )
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(dimensionResource(R.dimen.padding_small)))
                 Text(
                     text = title,
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(dimensionResource(R.dimen.padding_medium)))
             Text(
                 text = value,
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
@@ -739,7 +915,6 @@ fun InfoCard(
     }
 }
 
-
 fun openWhatsApp(context: Context, number: String) {
     try {
         val cleanNumber = number.replace(Regex("[^0-9]"), "")
@@ -748,15 +923,9 @@ fun openWhatsApp(context: Context, number: String) {
         i.data = url.toUri()
         context.startActivity(i)
     } catch (_: Exception) {
-        Toast.makeText(context, "WhatsApp not installed", Toast.LENGTH_SHORT)
+        Toast.makeText(
+            context, context.getString(R.string.error_whatsapp_not_installed), Toast.LENGTH_SHORT
+        )
             .show()
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-fun PreviewDetailRedesign() {
-    MultiLinkTheme {
-        DetailScreen(sessionId = "123", userId = "1", onBackClick = {})
     }
 }

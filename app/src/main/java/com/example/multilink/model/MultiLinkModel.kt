@@ -34,12 +34,12 @@ fun Map<String, Any>.toSessionData(sessionId: String): SessionData {
         joinCode = this["joinCode"] as? String ?: "",
         fromLocation = this["fromLocation"] as? String ?: "",
         toLocation = this["toLocation"] as? String ?: "",
-        startLat = this["startLat"] as? Double,
-        startLng = this["startLng"] as? Double,
-        endLat = this["endLat"] as? Double,
-        endLng = this["endLng"] as? Double,
+        startLat = (this["startLat"] as? Number)?.toDouble(),
+        startLng = (this["startLng"] as? Number)?.toDouble(),
+        endLat = (this["endLat"] as? Number)?.toDouble(),
+        endLng = (this["endLng"] as? Number)?.toDouble(),
         status = this["status"] as? String ?: "Live",
-        createdTimestamp = this["created"] as? Long ?: 0L,
+        createdTimestamp = (this["created"] as? Number)?.toLong() ?: 0L,
         durationVal = this["durationVal"] as? String ?: "2",
         durationUnit = this["durationUnit"] as? String ?: "Hrs",
         isSharingAllowed = this["isSharingAllowed"] as? Boolean ?: true,
@@ -87,12 +87,57 @@ data class MultiLinkUiState(
 )
 
 data class RecentSession(
-    val id: String,
-    val title: String,
-    val completedDate: String,
-    val duration: String,
-    val participants: String,
-    val startLoc: String,
-    val endLoc: String,
-    val totalDistance: String,
+    val id: String = "",
+    val title: String = "",
+    val completedDate: String = "",
+    val completedTimestamp: Long = 0L,
+    val duration: String = "",
+    val participants: String = "",
+    val startLoc: String = "",
+    val endLoc: String = "",
+    val totalDistance: String = "",
+    val hostName: String = "",
+    val hostPhone: String = "",
+    val hostEmail: String = "",
+    val completionReason: String = "",
+    val startLat: Double? = null,
+    val startLng: Double? = null,
+    val endLat: Double? = null,
+    val endLng: Double? = null
+)
+
+data class SessionUiState(
+    val isLoading: Boolean = true,
+    val sessionTitle: String = "Loading...",
+    val isSessionActive: Boolean = true,
+    val isRemoved: Boolean = false,
+    val hostId: String = "",
+    val currentUserId: String = "",
+    val participants: List<SessionParticipant> = emptyList(),
+    val startPoint: Point? = null,
+    val endPoint: Point? = null,
+    val startName: String = "Start",
+    val endName: String = "End",
+    val endLat: Double = 0.0,
+    val endLng: Double = 0.0,
+    val isCurrentUserAdmin: Boolean = false,
+    val sessionData: SessionData? = null
+)
+
+// Represents the user's lifetime stats
+data class UserStats(
+    val totalDistanceMeters: Double = 0.0,
+    val totalTimeSeconds: Long = 0L,
+    val totalSessions: Int = 0
+)
+
+// Represents a single notification/invite in the feed
+data class ActivityFeedItem(
+    val id: String = "",
+    val type: String = "alert", // Can be: "invite", "alert", or "info"
+    val title: String = "",
+    val message: String = "",
+    val sessionId: String = "", // Crucial so we can click "Accept" and join!
+    val timestamp: Long = System.currentTimeMillis(),
+    val isRead: Boolean = false
 )

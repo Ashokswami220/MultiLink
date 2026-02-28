@@ -42,6 +42,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -71,6 +72,7 @@ fun CreateSessionDialog(
     val shakeOffset = remember { Animatable(0f) }
     val isDark = isSystemInDarkTheme()
     val pagerState = rememberPagerState(pageCount = { 2 })
+    val context = LocalContext.current
 
     val inputSurfaceColor =
         if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surface
@@ -79,6 +81,7 @@ fun CreateSessionDialog(
     // --- STATE ---
     var title by rememberSaveable { mutableStateOf("") }
     var isTitleError by remember { mutableStateOf(false) }
+    var isPeopleError by remember { mutableStateOf(false) }
     var fromLoc by rememberSaveable { mutableStateOf("") }
     var toLoc by rememberSaveable { mutableStateOf("") }
     var isHours by rememberSaveable { mutableStateOf(true) }
@@ -391,27 +394,27 @@ fun CreateSessionDialog(
                                     OutlinedTextField(
                                         value = peopleText,
                                         onValueChange = { input ->
+                                            isPeopleError = false
                                             if (input.all { c -> c.isDigit() }) {
                                                 val num = input.toIntOrNull()
-                                                peopleText = if (num == null) {
-                                                    input
-                                                } else if (num <= 50) {
-                                                    input
-                                                } else {
-                                                    "50"
-                                                }
+                                                peopleText =
+                                                    if (num == null) input else if (num <= 50) input else "50"
                                             }
                                         },
                                         label = { Text("Participants") },
                                         leadingIcon = { Icon(Icons.Default.Person, null) },
                                         modifier = Modifier.weight(1f),
                                         shape = RoundedCornerShape(12.dp),
+                                        isError = isPeopleError,
                                         keyboardOptions = KeyboardOptions(
                                             keyboardType = KeyboardType.Number
                                         ),
                                         colors = OutlinedTextFieldDefaults.colors(
                                             unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                                            focusedContainerColor = Color.Transparent
+                                            focusedContainerColor = Color.Transparent,
+                                            errorContainerColor = MaterialTheme.colorScheme.errorContainer.copy(
+                                                alpha = 0.1f
+                                            )
                                         )
                                     )
                                     Spacer(Modifier.width(12.dp))
@@ -518,6 +521,31 @@ fun CreateSessionDialog(
                                         if (pagerState.currentPage == 0) {
                                             scope.launch { pagerState.animateScrollToPage(1) }
                                         } else {
+
+                                            val newLimit = peopleText.toIntOrNull() ?: 0
+                                            val currentActive = existingSession?.activeUsers ?: 0
+
+                                            if (existingSession != null && newLimit in 1..<currentActive) {
+                                                isPeopleError = true
+                                                triggerShake()
+
+                                                if (pagerState.currentPage == 1) {
+                                                    scope.launch {
+                                                        pagerState.animateScrollToPage(
+                                                            0
+                                                        )
+                                                    }
+                                                }
+
+                                                android.widget.Toast.makeText(
+                                                    context,
+                                                    "You already have $currentActive users joined",
+                                                    android.widget.Toast.LENGTH_LONG
+                                                )
+                                                    .show()
+                                                return@Button
+                                            }
+
                                             onSuccess(
                                                 SessionData(
                                                     id = existingSession?.id ?: "",

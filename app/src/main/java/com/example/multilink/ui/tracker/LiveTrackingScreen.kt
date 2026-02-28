@@ -7,12 +7,32 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.*
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsTopHeight
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
@@ -20,34 +40,58 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.AsyncImage
 import com.example.multilink.BuildConfig
 import com.example.multilink.R
+import com.example.multilink.model.SessionParticipant
 import com.example.multilink.repo.RealtimeRepository
 import com.example.multilink.repo.RouteRepository
-import com.example.multilink.model.SessionParticipant
 import com.example.multilink.service.LocationService
 import com.example.multilink.ui.components.MapTopBar
 import com.example.multilink.ui.components.MultiLinkMap
@@ -57,12 +101,10 @@ import com.example.multilink.ui.components.SessionMapContent
 import com.example.multilink.ui.components.dialogs.DeleteSessionDialog
 import com.example.multilink.ui.components.dialogs.PauseSessionDialog
 import com.example.multilink.ui.components.dialogs.SessionInfoDialog
-import com.example.multilink.ui.theme.MultiLinkTheme
 import com.example.multilink.ui.viewmodel.SessionViewModel
 import com.example.multilink.ui.viewmodel.SessionViewModelFactory
 import com.example.multilink.utils.LocationUtils
 import com.google.firebase.auth.FirebaseAuth
-
 import com.mapbox.geojson.Point
 import com.mapbox.maps.CameraOptions
 import com.mapbox.maps.extension.compose.animation.viewport.rememberMapViewportState
@@ -82,6 +124,8 @@ fun LiveTrackingScreen(
     onBackClick: () -> Unit,
     onUserDetailClick: (String) -> Unit,
     onStopSession: () -> Unit,
+    onSessionEnded: () -> Unit,
+    onSessionPaused: () -> Unit
 ) {
     val viewModel: SessionViewModel = viewModel(factory = SessionViewModelFactory(sessionId))
     val uiState by viewModel.uiState.collectAsState()
@@ -92,21 +136,73 @@ fun LiveTrackingScreen(
     val repository = remember { RealtimeRepository() }
     val scope = rememberCoroutineScope()
 
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, sessionId) {
+        var isWatching = false
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_START) {
+                // Screen is visible/foregrounded
+                if (!isWatching) {
+                    repository.incrementSessionWatchers(sessionId)
+                    isWatching = true
+                }
+            } else if (event == Lifecycle.Event.ON_STOP) {
+                // Screen is hidden/backgrounded
+                if (isWatching) {
+                    repository.decrementSessionWatchers(sessionId)
+                    isWatching = false
+                }
+            }
+        }
+
+        lifecycleOwner.lifecycle.addObserver(observer)
+
+        onDispose {
+            // Safety cleanup when composable is destroyed
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            if (isWatching) {
+                repository.decrementSessionWatchers(sessionId)
+                isWatching = false
+            }
+        }
+    }
+
     // --- ORIENTATION CHECK ---
     val configuration = LocalConfiguration.current
     val isPortrait = configuration.orientation == Configuration.ORIENTATION_PORTRAIT
 
     // Dialog States
-    var showDeleteDialog by remember { mutableStateOf(false) }
-    var showPauseDialog by remember { mutableStateOf(false) }
-    var showInfoDialog by remember { mutableStateOf(false) }
+    val (showDeleteDialog, setShowDeleteDialog) = remember { mutableStateOf(false) }
+    val (showPauseDialog, setShowPauseDialog) = remember { mutableStateOf(false) }
+    val (showInfoDialog, setShowInfoDialog) = remember { mutableStateOf(false) }
 
     // --- NAVIGATION GUARDS ---
-    LaunchedEffect(uiState.isSessionActive) {
-        if (!uiState.isSessionActive && !uiState.isLoading) {
+    var isNavigatingOut by remember { mutableStateOf(false) }
+
+    LaunchedEffect(
+        uiState.isSessionActive, uiState.isRemoved, uiState.isLoading, uiState.sessionData?.status
+    ) {
+        if (uiState.isLoading || isNavigatingOut) return@LaunchedEffect
+
+        val isPaused = uiState.sessionData?.status == "Paused"
+        val isAdmin = uiState.isCurrentUserAdmin
+
+        if (!uiState.isSessionActive) {
+            isNavigatingOut = true
             Toast.makeText(context, "Session Ended", Toast.LENGTH_SHORT)
                 .show()
-            onBackClick()
+            onSessionEnded()
+        } else if (uiState.isRemoved) {
+            kotlinx.coroutines.delay(100)
+            isNavigatingOut = true
+            Toast.makeText(context, "You were removed by the host", Toast.LENGTH_LONG)
+                .show()
+            onSessionEnded()
+        } else if (isPaused && !isAdmin) {
+            isNavigatingOut = true
+            Toast.makeText(context, "Session paused by Host", Toast.LENGTH_LONG)
+                .show()
+            onSessionPaused()
         }
     }
 
@@ -180,27 +276,27 @@ fun LiveTrackingScreen(
 
     if (showDeleteDialog) {
         DeleteSessionDialog(
-            onConfirm = { showDeleteDialog = false; onStopSession() },
-            onDismiss = { showDeleteDialog = false }
+            onConfirm = { setShowDeleteDialog(false); onStopSession() },
+            onDismiss = { setShowDeleteDialog(false) }
         )
     }
 
     if (showPauseDialog) {
-        val isPaused = false
+        val isPaused = uiState.sessionData?.status == "Paused"
         PauseSessionDialog(
             isPaused = isPaused,
             onConfirm = {
-                showPauseDialog = false
+                setShowPauseDialog(false)
                 scope.launch { repository.updateSessionStatus(sessionId, !isPaused) }
             },
-            onDismiss = { showPauseDialog = false }
+            onDismiss = { setShowPauseDialog(false) }
         )
     }
 
     if (showInfoDialog && uiState.sessionData != null) {
         SessionInfoDialog(
             session = uiState.sessionData!!,
-            onDismiss = { showInfoDialog = false }
+            onDismiss = { setShowInfoDialog(false) }
         )
     }
 
@@ -245,7 +341,7 @@ fun LiveTrackingScreen(
                     endName = uiState.endName,
                     isViewerAdmin = uiState.isCurrentUserAdmin,
                     isSessionAdminMode = true,
-                    sessionStatus = "Live",
+                    sessionStatus = uiState.sessionData?.status ?: "Live",
                     onBackClick = onBackClick,
                     onStartClick = {
                         if (uiState.startPoint != null) focusTarget =
@@ -261,9 +357,9 @@ fun LiveTrackingScreen(
                         )
                             .show()
                     },
-                    onDeleteClick = { showDeleteDialog = true },
-                    onPauseClick = { showPauseDialog = true },
-                    onInfoClick = { showInfoDialog = true },
+                    onDeleteClick = { setShowDeleteDialog(true) },
+                    onPauseClick = { setShowPauseDialog(true) },
+                    onInfoClick = { setShowInfoDialog(true) },
                     modifier = Modifier.padding(horizontal = 4.dp)
                 )
             }
@@ -406,13 +502,11 @@ fun LiveBottomSummary(
                 .fillMaxWidth()
         ) {
             if (isExpanded) {
-                // --- HEADER ROW (Active Chip Left | Collapse & Menu Right) ---
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // 1. ACTIVE CHIP (Top Left)
                     Surface(
                         color = MaterialTheme.colorScheme.secondaryContainer,
                         shape = RoundedCornerShape(16.dp),
@@ -520,7 +614,6 @@ fun LiveBottomSummary(
                                 )
                             ) {
                                 if (!showSortOptions) {
-                                    // STATE 1: Main Menu (Only "Sort by >")
                                     DropdownMenuItem(
                                         text = { Text("Sort by") },
                                         trailingIcon = {
@@ -532,9 +625,6 @@ fun LiveBottomSummary(
                                         onClick = { showSortOptions = true }
                                     )
                                 } else {
-                                    // STATE 2: Sort Options (Sub-menu)
-
-                                    // Back Button to go up one level
                                     DropdownMenuItem(
                                         text = {
                                             Text(
@@ -638,6 +728,21 @@ fun LiveBottomSummary(
                         horizontalArrangement = Arrangement.Start
                     ) {
                         itemsIndexed(sortedUserLocations) { index, (user, point) ->
+
+                            var userPhoto by rememberSaveable(user.id) {
+                                mutableStateOf<String?>(
+                                    null
+                                )
+                            }
+                            val repository = remember { RealtimeRepository() }
+
+                            LaunchedEffect(user.id) {
+                                val profile = repository.getGlobalUserProfile(user.id)
+                                if (profile != null) {
+                                    userPhoto = profile["photoUrl"]?.takeIf { it.isNotEmpty() }
+                                }
+                            }
+
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Column(
                                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -657,10 +762,21 @@ fun LiveBottomSummary(
                                             color = MaterialTheme.colorScheme.surfaceContainerHigh
                                         ) {
                                             Box(contentAlignment = Alignment.Center) {
-                                                Icon(
-                                                    Icons.Default.Person, null,
-                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
+                                                if (userPhoto != null) {
+                                                    AsyncImage(
+                                                        model = userPhoto,
+                                                        contentDescription = "Profile",
+                                                        modifier = Modifier
+                                                            .fillMaxSize()
+                                                            .clip(CircleShape),
+                                                        contentScale = ContentScale.Crop
+                                                    )
+                                                } else {
+                                                    Icon(
+                                                        Icons.Default.Person, null,
+                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
                                             }
                                         }
                                     }
@@ -796,15 +912,5 @@ fun UserMapMarker(user: SessionParticipant) {
                 .size(12.dp)
                 .rotate(180f)
         )
-    }
-}
-
-
-@Preview
-@Composable
-fun PreviewLiveTracking() {
-    MultiLinkTheme {
-        LiveTrackingScreen(
-            sessionId = "Goa Trip", onBackClick = {}, onUserDetailClick = {}, onStopSession = {})
     }
 }

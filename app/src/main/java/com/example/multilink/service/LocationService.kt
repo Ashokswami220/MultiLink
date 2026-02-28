@@ -5,6 +5,8 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.location.Location
@@ -50,6 +52,17 @@ class LocationService : Service() {
     @Volatile
     private var shouldUpdateStatusOnStop = true
 
+    @Volatile
+    private var isSessionPaused = false
+
+    @Volatile
+    private var isCurrentlyHighAccuracy = true
+
+    private var gpsReceiver: BroadcastReceiver? = null
+    private val connectedRef = com.google.firebase.database.FirebaseDatabase.getInstance()
+        .getReference(".info/connected")
+    private var connectionListener: com.google.firebase.database.ValueEventListener? = null
+
     companion object {
         const val ACTION_START = "ACTION_START"
         const val ACTION_STOP = "ACTION_STOP"
@@ -76,9 +89,7 @@ class LocationService : Service() {
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 result.lastLocation?.let { location ->
-                    // 1. Update local StateFlow (for UI)
                     _currentLocation.value = location
-
                     currentSessionId?.let { sessionId ->
                         if (isServiceActive) {
                             uploadLocationToFirebase(sessionId, location)
@@ -87,6 +98,75 @@ class LocationService : Service() {
                 }
             }
         }
+        connectionListener = object : com.google.firebase.database.ValueEventListener {
+            override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
+                val connected = snapshot.getValue(Boolean::class.java) ?: false
+                if (connected && isServiceActive && !isSessionPaused) {
+                    // Internet is back! Update status to Online
+                    currentSessionId?.let { sid ->
+                        serviceScope.launch {
+                            repository.updateUserStatus(sid, "Online")
+                            // Must re-register disconnect handler every time we reconnect
+                            repository.setupDisconnectHandler(sid)
+
+                            // Force a quick ping since we were just offline
+                            try {
+                                locationClient.getCurrentLocation(
+                                    Priority.PRIORITY_HIGH_ACCURACY, null
+                                )
+                                    .addOnSuccessListener { loc ->
+                                        if (loc != null) {
+                                            _currentLocation.value = loc
+                                            uploadLocationToFirebase(sid, loc)
+                                        }
+                                    }
+                            } catch (e: SecurityException) {
+                            }
+                        }
+                    }
+                }
+            }
+
+            override fun onCancelled(error: com.google.firebase.database.DatabaseError) {}
+        }
+        connectedRef.addValueEventListener(connectionListener!!)
+
+        gpsReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                if (intent.action == android.location.LocationManager.PROVIDERS_CHANGED_ACTION) {
+                    val locationManager = context.getSystemService(
+                        Context.LOCATION_SERVICE
+                    ) as android.location.LocationManager
+                    val isGpsEnabled = locationManager.isProviderEnabled(
+                        android.location.LocationManager.GPS_PROVIDER
+                    )
+
+                    val newStatus = if (isGpsEnabled) "Online" else "Location Off"
+
+                    currentSessionId?.let { sid ->
+                        serviceScope.launch {
+                            repository.updateUserStatus(sid, newStatus)
+                        }
+                    }
+
+                    if (isGpsEnabled && isServiceActive && !isSessionPaused) {
+                        try {
+                            locationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
+                                .addOnSuccessListener { loc ->
+                                    if (loc != null && currentSessionId != null) {
+                                        _currentLocation.value = loc
+                                        uploadLocationToFirebase(currentSessionId!!, loc)
+                                    }
+                                }
+                        } catch (e: SecurityException) {
+                        }
+                    }
+                }
+            }
+        }
+        registerReceiver(
+            gpsReceiver, IntentFilter(android.location.LocationManager.PROVIDERS_CHANGED_ACTION)
+        )
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -99,21 +179,124 @@ class LocationService : Service() {
                     shouldUpdateStatusOnStop = true
 
                     startForegroundService()
-                    startLocationUpdates()
+                    requestLocationUpdates(isCurrentlyHighAccuracy)
+
+                    try {
+                        locationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
+                            .addOnSuccessListener { location ->
+                                if (location != null && isServiceActive) {
+                                    _currentLocation.value = location
+                                    uploadLocationToFirebase(sessionId, location)
+                                }
+                            }
+                    } catch (e: SecurityException) {
+                        e.printStackTrace()
+                    }
 
                     serviceScope.launch {
                         repository.updateUserStatus(sessionId, "Online")
                         repository.setupDisconnectHandler(sessionId)
 
-                        repository.listenForRemoval(sessionId)
-                            .collectLatest { isRemoved ->
-                                if (isRemoved) {
-                                    isServiceActive = false
-                                    shouldUpdateStatusOnStop = false
-                                    stopLocationUpdates()
-                                    stopSelf()
+                        val myUserId = auth.currentUser?.uid
+                        if (myUserId != null) {
+                            launch {
+                                kotlinx.coroutines.flow.combine(
+                                    repository.listenToSessionWatchers(sessionId),
+                                    repository.listenToUserWatchers(sessionId, myUserId)
+                                ) { sessionWatchers, myWatchers ->
+                                    // High Accuracy if ANYONE is on the LiveMap OR looking directly at ME
+                                    sessionWatchers > 0 || myWatchers > 0
                                 }
+                                    .collectLatest { requiresHighAccuracy ->
+                                        // Only restart the GPS hardware if the mode actually changed
+                                        if (isCurrentlyHighAccuracy != requiresHighAccuracy) {
+                                            isCurrentlyHighAccuracy = requiresHighAccuracy
+                                            // Update the ongoing request only if service is active and not paused
+                                            if (isServiceActive && !isSessionPaused) {
+                                                requestLocationUpdates(requiresHighAccuracy)
+                                            }
+                                        }
+                                    }
                             }
+                        }
+
+                        // 1. Listen for permanent removal/kicks
+                        launch {
+                            repository.listenForRemoval(sessionId)
+                                .collectLatest { isRemoved ->
+                                    if (isRemoved) {
+                                        isServiceActive = false
+                                        shouldUpdateStatusOnStop = false
+                                        stopLocationUpdates()
+                                        repository.deleteMyNode(sessionId)
+                                        stopSelf()
+                                    }
+                                }
+                        }
+
+                        // 2. Listen for Global Session Pause
+                        launch {
+                            repository.listenToSessionStatus(sessionId)
+                                .collectLatest { status ->
+                                    val wasPaused = isSessionPaused
+                                    isSessionPaused = (status == "Paused")
+
+                                    if (isSessionPaused && !wasPaused) {
+                                        stopLocationUpdates()
+                                    } else if (!isSessionPaused && wasPaused && isServiceActive) {
+                                        serviceScope.launch {
+                                            repository.updateUserStatus(
+                                                sessionId, "Online"
+                                            )
+                                        }
+                                        requestLocationUpdates(isCurrentlyHighAccuracy)
+                                    }
+
+                                    if (status == "Ended") {
+                                        isServiceActive = false
+                                        shouldUpdateStatusOnStop = false
+                                        stopLocationUpdates()
+                                        stopSelf()
+                                    }
+                                }
+                        }
+
+                        // 3. Listen for Individual User Pause (Admin paused THIS specific user)
+                        launch {
+                            val userId = auth.currentUser?.uid ?: return@launch
+                            val userRef =
+                                com.google.firebase.database.FirebaseDatabase.getInstance().reference
+                                    .child("sessions")
+                                    .child(sessionId)
+                                    .child("users")
+                                    .child(userId)
+                                    .child("status")
+
+                            val userStatusListener =
+                                object : com.google.firebase.database.ValueEventListener {
+                                    override fun onDataChange(
+                                        snapshot: com.google.firebase.database.DataSnapshot
+                                    ) {
+                                        val status =
+                                            snapshot.getValue(String::class.java) ?: "Online"
+
+                                        if (isSessionPaused) return
+
+                                        if (status == "Paused" && isServiceActive) {
+                                            stopLocationUpdates()
+                                        } else if (status != "Paused" && isServiceActive) {
+                                            // Resume with the adaptive accuracy
+                                            requestLocationUpdates(isCurrentlyHighAccuracy)
+                                        }
+                                    }
+
+                                    override fun onCancelled(
+                                        error: com.google.firebase.database.DatabaseError
+                                    ) {
+                                    }
+                                }
+                            userRef.addValueEventListener(userStatusListener)
+                        }
                     }
                 } else {
                     stopSelf()
@@ -143,11 +326,22 @@ class LocationService : Service() {
     }
 
     @SuppressLint("MissingPermission")
-    private fun startLocationUpdates() {
-        val request =
-            LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000L) // Update every 5s
-                .setMinUpdateDistanceMeters(5f) // Or every 5 meters
+    private fun requestLocationUpdates(highAccuracy: Boolean) {
+        locationClient.removeLocationUpdates(locationCallback)
+
+        val request = if (highAccuracy) {
+            // HIGH POWER MODE: Someone is watching!
+            // Update every 5 seconds, or if they move 2 meters.
+            LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 3000L)
+                .setMinUpdateDistanceMeters(2f)
                 .build()
+        } else {
+            // LOW POWER MODE: Phones are in pockets.
+            // Update every 30 seconds, and only if they move 20+ meters.
+            LocationRequest.Builder(Priority.PRIORITY_BALANCED_POWER_ACCURACY, 30000L)
+                .setMinUpdateDistanceMeters(20f)
+                .build()
+        }
 
         locationClient.requestLocationUpdates(
             request,
@@ -158,7 +352,6 @@ class LocationService : Service() {
 
     private fun stopLocationUpdates() {
         locationClient.removeLocationUpdates(locationCallback)
-        cancel()
     }
 
     private fun uploadLocationToFirebase(sessionId: String, location: Location) {
@@ -176,7 +369,7 @@ class LocationService : Service() {
             status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL
 
         serviceScope.launch {
-            if (isServiceActive) {
+            if (isServiceActive && !isSessionPaused) {
                 repository.updateMyLocation(
                     sessionId = sessionId,
                     lat = location.latitude,
@@ -234,6 +427,15 @@ class LocationService : Service() {
                 serviceScope.launch { repository.updateUserStatus(sid, "Offline") }
             }
         }
+
+        gpsReceiver?.let {
+            try {
+                unregisterReceiver(it)
+            } catch (e: Exception) {
+            }
+        }
+
+        connectionListener?.let { connectedRef.removeEventListener(it) }
 
         super.onDestroy()
         serviceScope.cancel()

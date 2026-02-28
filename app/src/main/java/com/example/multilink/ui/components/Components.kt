@@ -75,9 +75,14 @@ class SessionActionHandler(
         }
     }
 
-    fun onShowInfo(isSelf: Boolean) {
-        val msg = if (isSelf) "This is your card" else "User Info"
-        Toast.makeText(context, msg, Toast.LENGTH_SHORT)
-            .show()
+    fun onToggleUserPause(
+        sessionId: String, userId: String, currentStatus: String, userName: String
+    ) {
+        scope.launch {
+            val newStatus = if (currentStatus == "Paused") "Online" else "Paused"
+            repository.updateUserStatusForAdmin(sessionId, userId, newStatus)
+            Toast.makeText(context, "$userName is now $newStatus", Toast.LENGTH_SHORT)
+                .show()
+        }
     }
 }

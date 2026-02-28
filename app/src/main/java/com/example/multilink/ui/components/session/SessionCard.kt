@@ -163,7 +163,14 @@ fun SessionCard(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         ),
         elevation = CardDefaults.cardElevation(2.dp),
-        onClick = { if (!isPaused) onClick() },
+        onClick = {
+            if (isAdmin || !isPaused) {
+                onClick()
+            } else {
+                Toast.makeText(context, "Session is paused by Host", Toast.LENGTH_SHORT)
+                    .show()
+            }
+        },
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             // Header

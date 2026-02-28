@@ -5,7 +5,7 @@
     <string name="loc_not_sel_by_host">Location not selected by Host</string>
 
     <string name="nav_home">Home</string>
-    <string name="nav_user">User</string>
+    <string name="nav_activity">Activity</string>
     <string name="nav_recent">Recent</string>
     <string name="nav_settings">Settings</string>
 
@@ -44,12 +44,34 @@
     <string name="error_max_limit_reached">Max limit is %1$s</string>
     <string name="label_max_limit_helper">Max: %1$s</string>
 
-    // See all screen
+    // See All Screen , Live Tracking
+    <string name="msg_session_ended_host">Session Ended by Host</string>
+    <string name="msg_removed_from_session">You were removed from the session</string>
+    <string name="cd_menu">Menu</string>
+    <string name="sort_az">Name: A - Z</string>
+    <string name="sort_za">Name: Z - A</string>
+    <string name="sort_joined_first">Joined First</string>
+    <string name="sort_joined_late">Joined Late</string>
+    <string name="menu_session_info">Session Info</string>
+    <string name="menu_sort_by">Sort by</string>
+    <string name="menu_resume_session">Resume Session</string>
+    <string name="menu_pause_session">Pause Session</string>
+    <string name="menu_delete_session">Delete Session</string>
+    <string name="header_session_lobby">Session Lobby</string>
+    <string name="format_active_participants">%1$d Active Participants</string>
+    <string name="state_loading">Loading...</string>
+    <string name="btn_track_all">Track All</string>
+    <string name="desc_track_all">Allow you to track all participants at once in one single map view.</string>
+    <string name="label_admin">ADMIN</string>
+    <string name="action_remove">Remove</string>
+    <string name="state_calculating">Calculating...</string>
+    <string name="format_distance_to_dest">%1$s to reach dest</string>
     <string name="label_last_updated">Updated: %1$s</string>
     <string name="cd_back_button">Go Back</string>
     <string name="placeholder_name">Unknown User</string>
     <string name="placeholder_number">No Contact Info</string>
 
+    //Live tracking screen
 
     // Detail Screen
     <string name="action_call">Call</string>
@@ -60,6 +82,44 @@
     <string name="label_status_offline">Offline</string>
     <string name="label_battery_charging">%1$d%% • Charging</string>
     <string name="label_battery_normal">%1$d%%</string>
+    <string name="msg_session_ended">Session Ended</string>
+    <string name="msg_user_left_session">User left the session</string>
+    <string name="placeholder_no_contact">Private / No Contact</string>
+
+    <string name="action_whatsapp">WhatsApp</string>
+
+    <string name="error_no_phone">No phone number available</string>
+    <string name="error_maps_not_installed">Maps not installed</string>
+    <string name="error_whatsapp_not_installed">WhatsApp not installed</string>
+    <string name="error_start_loc_not_set">Start location not set</string>
+    <string name="error_dest_not_set">Destination not set</string>
+    <string name="error_user_loc_not_available">User location not available</string>
+
+    <string name="label_distance">Distance</string>
+    <string name="label_from_you">From You</string>
+    <string name="label_to_destination">To Destination</string>
+    <string name="label_remaining">Remaining</string>
+    <string name="label_destination">Destination</string>
+    <string name="label_not_selected">Not Selected</string>
+    <string name="label_by_host">By Host</string>
+    <string name="label_speed">Speed</string>
+    <string name="label_moving">Moving</string>
+    <string name="label_stopped">Stopped</string>
+    <string name="label_est_time">Est. Time To Dest</string>
+    <string name="label_to_arrival">To Arrival</string>
+    <string name="label_no_time">No Time</string>
+    <string name="label_end_loc_not_selected">End Loc not selected</string>
+    <string name="label_battery">Battery</string>
+    <string name="label_charging">Charging</string>
+    <string name="label_normal">Normal</string>
+    <string name="label_status">Status</string>
+    <string name="label_activity">Activity</string>
+
+    <string name="cd_toggle_fullscreen">Toggle Full Screen</string>
+
+    <string name="format_speed_kmh">%1$d km/h</string>
+    <string name="format_time_hr_min">%1$d hr %2$d min</string>
+    <string name="format_time_min">%1$d min</string>
 
 
     // User Screen

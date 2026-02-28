@@ -3,32 +3,15 @@ package com.example.multilink.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.example.multilink.model.SessionParticipant
+import com.example.multilink.model.RecentSession
 import com.example.multilink.model.toSessionData
 import com.example.multilink.repo.RealtimeRepository
 import com.google.firebase.auth.FirebaseAuth
 import com.mapbox.geojson.Point
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import com.example.multilink.model.SessionData
-
-data class SessionUiState(
-    val isLoading: Boolean = true,
-    val sessionTitle: String = "Loading...",
-    val isSessionActive: Boolean = true,
-    val isRemoved: Boolean = false,
-    val hostId: String = "",
-    val currentUserId: String = "",
-    val participants: List<SessionParticipant> = emptyList(),
-    val startPoint: Point? = null,
-    val endPoint: Point? = null,
-    val startName: String = "Start",
-    val endName: String = "End",
-    val endLat: Double = 0.0,
-    val endLng: Double = 0.0,
-    val isCurrentUserAdmin: Boolean = false,
-    val sessionData: SessionData? = null
-)
+import com.example.multilink.model.SessionUiState
+import kotlinx.coroutines.delay
 
 class SessionViewModel(
     private val sessionId: String,
@@ -38,25 +21,67 @@ class SessionViewModel(
     private val _uiState = MutableStateFlow(SessionUiState())
     val uiState: StateFlow<SessionUiState> = _uiState.asStateFlow()
 
-    var isManualRemoval = false
+    private val _recentSessions = MutableStateFlow<List<RecentSession>>(emptyList())
+    val recentSessions: StateFlow<List<RecentSession>> = _recentSessions.asStateFlow()
+
+    private var participantsJob: kotlinx.coroutines.Job? = null
 
     init {
         val currentUser = FirebaseAuth.getInstance().currentUser?.uid ?: ""
         _uiState.update { it.copy(currentUserId = currentUser) }
 
-        monitorSessionDetails()
-        monitorParticipants()
-        monitorSessionStatus()
-        monitorSelfRemoval()
+        if (sessionId.isNotEmpty()) {
+            monitorSessionDetails()
+            monitorSessionStatus()
+            monitorSelfRemoval()
+            startOfflineTicker()
+        }
+
+        fetchRecentSessions()
+    }
+
+    private fun fetchRecentSessions() {
+        viewModelScope.launch {
+            repository.getRecentSessions()
+                .collectLatest { sessions ->
+                    _recentSessions.value = sessions
+                }
+        }
+    }
+
+    fun deleteRecentSession(sessionId: String) {
+        viewModelScope.launch {
+            repository.deleteRecentSession(sessionId)
+        }
+    }
+
+    private fun startOfflineTicker() {
+        viewModelScope.launch {
+            while (true) {
+                delay(5000)
+
+                val now = System.currentTimeMillis()
+                _uiState.update { state ->
+                    val refreshedParticipants = state.participants.map { user ->
+                        if (user.status != "Paused" && user.lastUpdated > 0 && (now - user.lastUpdated) > 40_000L) {
+                            user.copy(status = "Offline")
+                        } else {
+                            user
+                        }
+                    }
+                    state.copy(participants = refreshedParticipants)
+                }
+            }
+        }
     }
 
     private fun monitorSessionDetails() {
         viewModelScope.launch {
             repository.getSessionDetails(sessionId)
                 .collectLatest { dataMap ->
+                    if (dataMap.isEmpty()) return@collectLatest
 
                     val fullSession = dataMap.toSessionData(sessionId)
-
                     val sLat = fullSession.startLat ?: 0.0
                     val sLng = fullSession.startLng ?: 0.0
                     val eLat = fullSession.endLat ?: 0.0
@@ -64,6 +89,36 @@ class SessionViewModel(
 
                     val start = if (sLat != 0.0) Point.fromLngLat(sLng, sLat) else null
                     val end = if (eLat != 0.0) Point.fromLngLat(eLng, eLat) else null
+
+                    if (fullSession.status == "Paused") {
+                        participantsJob?.cancel()
+                        participantsJob = null
+
+                        viewModelScope.launch {
+                            try {
+                                val frozenUsers = repository.getSessionUsers(sessionId)
+                                    .first()
+                                _uiState.update { it.copy(participants = frozenUsers) }
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                            }
+                        }
+                    } else if (fullSession.status == "Live") {
+                        if (participantsJob == null || participantsJob?.isActive == false) {
+                            participantsJob = viewModelScope.launch {
+                                repository.getSessionUsers(sessionId)
+                                    .collectLatest { users ->
+                                        val now = System.currentTimeMillis()
+                                        val checkedUsers = users.map { user ->
+                                            if (user.status != "Paused" && user.lastUpdated > 0 && (now - user.lastUpdated) > 60_000L) {
+                                                user.copy(status = "Offline")
+                                            } else user
+                                        }
+                                        _uiState.update { it.copy(participants = checkedUsers) }
+                                    }
+                            }
+                        }
+                    }
 
                     _uiState.update { state ->
                         state.copy(
@@ -84,15 +139,6 @@ class SessionViewModel(
         }
     }
 
-    private fun monitorParticipants() {
-        viewModelScope.launch {
-            repository.getSessionUsers(sessionId)
-                .collectLatest { users ->
-                    _uiState.update { it.copy(participants = users) }
-                }
-        }
-    }
-
     private fun monitorSessionStatus() {
         viewModelScope.launch {
             repository.checkSessionActive(sessionId)
@@ -106,7 +152,6 @@ class SessionViewModel(
         viewModelScope.launch {
             repository.listenForRemoval(sessionId)
                 .collectLatest { removed ->
-                    // Only update if I am NOT the admin (Host can't be removed logic)
                     if (removed && _uiState.value.hostId.isNotEmpty() && _uiState.value.currentUserId != _uiState.value.hostId) {
                         _uiState.update { it.copy(isRemoved = true) }
                     }

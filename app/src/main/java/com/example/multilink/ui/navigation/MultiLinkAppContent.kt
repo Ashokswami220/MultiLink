@@ -9,6 +9,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -23,13 +24,17 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
 import com.example.multilink.R
+import com.google.firebase.auth.FirebaseAuth
 
 data class MultiLinkNavItem(
     val dest: BottomNavDest,
@@ -52,6 +57,9 @@ fun MultiLinkTopBar(
     elevation: Dp = dimensionResource(id = R.dimen.elevation_top_bar),
     windowInsets: WindowInsets = TopAppBarDefaults.windowInsets
 ) {
+    val auth = remember { FirebaseAuth.getInstance() }
+    val myPhotoUrl = auth.currentUser?.photoUrl?.toString()
+
     CenterAlignedTopAppBar(
         modifier = modifier.shadow(elevation = elevation),
         title = {
@@ -74,14 +82,25 @@ fun MultiLinkTopBar(
         },
         actions = {
             IconButton(onClick = onProfileClick) {
-                Icon(
-                    imageVector = Icons.Default.AccountCircle,
-                    contentDescription = stringResource(id = R.string.cd_profile),
-                    modifier = Modifier.size(dimensionResource(id = R.dimen.icon_profile)),
-                )
+                if (myPhotoUrl != null) {
+                    AsyncImage(
+                        model = myPhotoUrl,
+                        contentDescription = stringResource(id = R.string.cd_profile),
+                        modifier = Modifier
+                            .size(dimensionResource(id = R.dimen.icon_profile))
+                            .clip(CircleShape),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.AccountCircle,
+                        contentDescription = stringResource(id = R.string.cd_profile),
+                        modifier = Modifier.size(dimensionResource(id = R.dimen.icon_profile)),
+                    )
+                }
             }
         },
-        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+        colors = TopAppBarDefaults.topAppBarColors(
             containerColor = containerColor,
             navigationIconContentColor = contentColor,
             actionIconContentColor = profileColor,
@@ -91,32 +110,9 @@ fun MultiLinkTopBar(
     )
 }
 
-@Composable
-fun ScreenWithTopBar(
-    title: String? = null,
-    onDrawerClick: () -> Unit,
-    onProfileClick: () -> Unit,
-    content: @Composable (PaddingValues) -> Unit,
-) {
-    Scaffold(
-        topBar = {
-            MultiLinkTopBar(
-                onDrawerClick = onDrawerClick,
-                onProfileClick = onProfileClick
-            )
-        }
-    ) { topBarPadding ->
-        content(topBarPadding)
-    }
-}
 
-@Composable
-fun MultiLinkNavigationBar(
-    currentDestination: BottomNavDest,
-    onDestinationSelected: (BottomNavDest) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val items = listOf(
+val navItems
+    @Composable get() = listOf(
         MultiLinkNavItem(
             dest = BottomNavDest.Home,
             selectedIcon = Icons.Filled.Home,
@@ -124,10 +120,10 @@ fun MultiLinkNavigationBar(
             label = stringResource(id = R.string.nav_home)
         ),
         MultiLinkNavItem(
-            dest = BottomNavDest.User,
-            selectedIcon = Icons.Filled.Person,
-            unselectedIcon = Icons.Outlined.Person,
-            label = stringResource(id = R.string.nav_user)
+            dest = BottomNavDest.Activity,
+            selectedIcon = Icons.Filled.Notifications,
+            unselectedIcon = Icons.Outlined.Notifications,
+            label = stringResource(id = R.string.nav_activity)
         ),
         MultiLinkNavItem(
             dest = BottomNavDest.Recent,
@@ -143,10 +139,16 @@ fun MultiLinkNavigationBar(
         )
     )
 
+@Composable
+fun MultiLinkNavigationBar(
+    currentDestination: BottomNavDest,
+    onDestinationSelected: (BottomNavDest) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     BottomNavigationBar(
         currentDestination = currentDestination,
         onDestinationSelected = onDestinationSelected,
-        items = items,
+        items = navItems,
         modifier = modifier
     )
 }
@@ -284,6 +286,110 @@ private fun BottomNavigationBar(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun MultiLinkNavigationRail(
+    currentDestination: BottomNavDest,
+    onDestinationSelected: (BottomNavDest) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val items = navItems
+
+    Surface(
+        modifier = modifier
+            .fillMaxHeight()
+            .width(220.dp), // Acts as an expanded navigation drawer
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        tonalElevation = dimensionResource(id = R.dimen.elevation_card),
+        shadowElevation = dimensionResource(id = R.dimen.elevation_dialog)
+    ) {
+        Row(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .windowInsetsPadding(
+                        WindowInsets.systemBars.only(
+                            WindowInsetsSides.Vertical + WindowInsetsSides.Start
+                        )
+                    )
+                    .padding(horizontal = 12.dp),
+                // ⭐ FIXED: Grouped items tightly together and centered them vertically
+                verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
+                horizontalAlignment = Alignment.Start
+            ) {
+                items.forEach { item ->
+                    val isSelected = currentDestination == item.dest
+                    val interactionSource = remember { MutableInteractionSource() }
+
+                    // Icon Bounce Animation
+                    val scale = remember { Animatable(1f) }
+
+                    LaunchedEffect(isSelected) {
+                        if (isSelected) {
+                            scale.animateTo(1.2f, tween(150))
+                            scale.animateTo(
+                                1f, spring(
+                                    Spring.DampingRatioMediumBouncy, Spring.StiffnessLow
+                                )
+                            )
+                        } else {
+                            scale.snapTo(1f)
+                        }
+                    }
+
+                    // ⭐ FIXED: Removed the sweeping fraction animation. Now it's a solid pill clip.
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp) // Standard expanded rail item height
+                            .clip(RoundedCornerShape(50)) // Pill shape for the highlight
+                            .background(
+                                if (isSelected) MaterialTheme.colorScheme.secondaryContainer
+                                else Color.Transparent
+                            )
+                            .clickable(
+                                interactionSource = interactionSource, indication = null
+                            ) { onDestinationSelected(item.dest) },
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(start = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = if (isSelected) item.selectedIcon else item.unselectedIcon,
+                                contentDescription = item.label,
+                                tint = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier
+                                    .size(dimensionResource(id = R.dimen.icon_nav))
+                                    .scale(scale.value)
+                            )
+
+                            Spacer(modifier = Modifier.width(16.dp))
+
+                            Text(
+                                text = item.label,
+                                style = MaterialTheme.typography.labelLarge.copy(
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                ),
+                                color = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Subtle right divider
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .width(dimensionResource(id = R.dimen.divider_thickness))
+                    .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+            )
         }
     }
 }

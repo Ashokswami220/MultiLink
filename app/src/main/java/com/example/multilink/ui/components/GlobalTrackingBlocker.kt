@@ -10,10 +10,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.GpsOff
 import androidx.compose.material.icons.filled.LocationOff
 import androidx.compose.material.icons.filled.NotificationsOff
@@ -22,12 +20,18 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer // ⭐ follow this thing for all upcoming prompts
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -40,6 +44,8 @@ import com.example.multilink.utils.openAppSettings
 import com.example.multilink.utils.openLocationSettings
 import com.example.multilink.utils.rememberGpsEnabledState
 import com.google.firebase.auth.FirebaseAuth
+import kotlinx.coroutines.isActive
+import kotlin.math.roundToInt
 
 @Composable
 fun GlobalTrackingBlocker(
@@ -121,7 +127,7 @@ fun GlobalTrackingBlocker(
                         BlockingScreenContent(
                             icon = Icons.Default.LocationOff,
                             featureName = "Location Access",
-                            actionMessage = "I need this permission to find you on the map.",
+                            actionMessage = "we need this permission to find you on the map.",
                             buttonText = "Fix Permissions",
                             onButtonClick = { context.openAppSettings() }
                         )
@@ -131,7 +137,7 @@ fun GlobalTrackingBlocker(
                         BlockingScreenContent(
                             icon = Icons.Default.GpsOff,
                             featureName = "Device GPS",
-                            actionMessage = "Please turn it on so your friends can see your live location.",
+                            actionMessage = "please turn it on so your friends can see your live location.",
                             buttonText = "Turn On GPS",
                             onButtonClick = { context.openLocationSettings() }
                         )
@@ -141,7 +147,7 @@ fun GlobalTrackingBlocker(
                         BlockingScreenContent(
                             icon = Icons.Default.NotificationsOff,
                             featureName = "Notifications",
-                            actionMessage = "I need this to keep tracking alive in the background.",
+                            actionMessage = "we need this to keep tracking alive in the background.",
                             buttonText = "Allow Notifications",
                             onButtonClick = { context.openAppSettings() }
                         )
@@ -170,18 +176,27 @@ private fun BlockingScreenContent(
         iterations = LottieConstants.IterateForever
     )
 
-    val infiniteTransition = rememberInfiniteTransition(label = "bouncy_arrow")
-    val offsetY by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 10f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(800, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "arrow_offset"
-    )
-
     val (showReasonDialog, setShowReasonDialog) = remember { mutableStateOf(false) }
+
+    val density = LocalDensity.current
+    var trackWidthPx by remember { mutableFloatStateOf(0f) }
+    val lottieSizeDp = 100.dp
+    val lottieSizePx = with(density) { lottieSizeDp.toPx() }
+
+    val offsetX = remember { Animatable(-lottieSizePx) }
+
+    LaunchedEffect(trackWidthPx) {
+        if (trackWidthPx > 0f) {
+            while (isActive) {
+                offsetX.snapTo(-lottieSizePx)
+                offsetX.animateTo(
+                    targetValue = trackWidthPx,
+                    // ⭐ follow this thing for all upcoming prompts: Increased duration to 6000ms for a slower walk
+                    animationSpec = tween(durationMillis = 6000, easing = LinearEasing)
+                )
+            }
+        }
+    }
 
     if (showReasonDialog) {
         AlertDialog(
@@ -196,7 +211,9 @@ private fun BlockingScreenContent(
             title = { Text("Why is this needed?") },
             text = {
                 Text(
-                    actionMessage, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()
+                    actionMessage,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
                 )
             },
             confirmButton = {
@@ -211,125 +228,126 @@ private fun BlockingScreenContent(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp),
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
     ) {
         Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(24.dp)
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.Start
         ) {
 
-            LottieAnimation(
-                composition = composition,
-                progress = { progress },
-                modifier = Modifier.size(140.dp)
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = "Hey $userName...",
-                style = MaterialTheme.typography.headlineSmall.copy(
-                    fontWeight = FontWeight.ExtraBold
-                ),
-                color = MaterialTheme.colorScheme.primary,
-                textAlign = TextAlign.Center
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Text(
-                text = "It seems you turned off",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center,
-                modifier = Modifier.fillMaxWidth()
+            // --- TOP ROW: Walking Animation Stage ---
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(110.dp)
+                    .background(
+                        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.3f)
+                    )
+                    .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
+                    .onGloballyPositioned { coordinates ->
+                        trackWidthPx = coordinates.size.width.toFloat()
+                    }
             ) {
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.8f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.3f)),
-                    contentColor = MaterialTheme.colorScheme.onErrorContainer
+                LottieAnimation(
+                    composition = composition,
+                    progress = { progress },
+                    modifier = Modifier
+                        .size(lottieSizeDp)
+                        .align(Alignment.BottomStart)
+                        .offset { IntOffset(offsetX.value.roundToInt(), 0) }
+                        // ⭐ follow this thing for all upcoming prompts: scaleX = -1f mirrors the animation horizontally!
+                        .graphicsLayer { scaleX = -1f }
+                )
+            }
+
+            // --- BOTTOM SECTION: Left-Aligned Info & Button ---
+            Column(
+                modifier = Modifier.padding(24.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Row(
-                        modifier = Modifier.padding(
-                            horizontal = 16.dp, vertical = 8.dp
-                        ),
-                        verticalAlignment = Alignment.CenterVertically,
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer
                     ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                imageVector = icon,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "$featureName disabled",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+
+                    IconButton(onClick = { setShowReasonDialog(true) }) {
                         Icon(
-                            imageVector = icon,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.error
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = featureName,
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.Bold
-                            ),
-                            color = MaterialTheme.colorScheme.error
+                            imageVector = Icons.Outlined.Info,
+                            contentDescription = "Why?",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
-                IconButton(
-                    onClick = { setShowReasonDialog(true) },
+                // ⭐ follow this thing for all upcoming prompts: Removed excess text and kept it short and sweet.
+                Text(
+                    text = "Hey $userName,",
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontWeight = FontWeight.Bold
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "It seems you turned off $featureName.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 22.sp
+                )
+
+                Spacer(modifier = Modifier.height(32.dp))
+
+                Button(
+                    onClick = onButtonClick,
                     modifier = Modifier
-                        .size(36.dp)
-                        .background(MaterialTheme.colorScheme.surfaceContainerHighest, CircleShape)
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary
+                    )
                 ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Info,
-                        contentDescription = "Why?",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp)
+                    Text(
+                        text = buttonText,
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold
+                        )
                     )
                 }
-            }
-
-
-            Spacer(modifier = Modifier.height(32.dp))
-
-            Icon(
-                imageVector = Icons.Default.ArrowDownward,
-                contentDescription = "Point down",
-                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
-                modifier = Modifier
-                    .size(24.dp)
-                    .offset(y = offsetY.dp)
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Button(
-                onClick = onButtonClick,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary
-                )
-            ) {
-                Text(
-                    text = buttonText,
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                )
             }
         }
     }

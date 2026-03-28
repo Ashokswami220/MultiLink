@@ -20,8 +20,10 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
-import com.example.multilink.model.toSessionData
 import com.example.multilink.utils.LocationUtils.calculateDistance
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class RealtimeRepository {
 
@@ -221,17 +223,62 @@ class RealtimeRepository {
                 .child(sessionId)
                 .get()
                 .await()
-            val sessionDataMap = snapshot.value as? Map<String, Any>
-            if (sessionDataMap != null) {
-                val sessionData = sessionDataMap.toSessionData(sessionId)
+            if (snapshot.exists()) {
                 val pCount = snapshot.child("users").childrenCount.toInt()
-                archiveSessionForUser(targetUserId, sessionData, pCount, "Removed by Admin")
+                val title = snapshot.child("title")
+                    .getValue(String::class.java) ?: "Unnamed Session"
+
+                val sessionData = SessionData(
+                    id = sessionId,
+                    title = title,
+                    hostId = snapshot.child("hostId")
+                        .getValue(String::class.java) ?: "",
+                    hostName = snapshot.child("hostName")
+                        .getValue(String::class.java) ?: "Unknown Host",
+                    fromLocation = snapshot.child("fromLocation")
+                        .getValue(String::class.java) ?: "",
+                    toLocation = snapshot.child("toLocation")
+                        .getValue(String::class.java) ?: "",
+                    startLat = snapshot.child("startLat")
+                        .getValue(Double::class.java) ?: 0.0,
+                    startLng = snapshot.child("startLng")
+                        .getValue(Double::class.java) ?: 0.0,
+                    endLat = snapshot.child("endLat")
+                        .getValue(Double::class.java) ?: 0.0,
+                    endLng = snapshot.child("endLng")
+                        .getValue(Double::class.java) ?: 0.0,
+                    createdTimestamp = snapshot.child("created")
+                        .getValue(Long::class.java) ?: 0L,
+                    durationVal = snapshot.child("durationVal")
+                        .getValue(String::class.java) ?: "2",
+                    durationUnit = snapshot.child("durationUnit")
+                        .getValue(String::class.java) ?: "Hrs",
+                    maxPeople = snapshot.child("maxPeople")
+                        .getValue(String::class.java) ?: "10",
+                    status = snapshot.child("status")
+                        .getValue(String::class.java) ?: "Ended",
+                    joinCode = snapshot.child("joinCode")
+                        .getValue(String::class.java) ?: "",
+                    isUsersVisible = snapshot.child("isUsersVisible")
+                        .getValue(Boolean::class.java) ?: true,
+                    isSharingAllowed = snapshot.child("isSharingAllowed")
+                        .getValue(Boolean::class.java) ?: true,
+                    isHostSharing = snapshot.child("isHostSharing")
+                        .getValue(Boolean::class.java) ?: true,
+                    activeUsers = pCount
+                )
+
+                try {
+                    archiveSessionForUser(targetUserId, sessionData, pCount, "Removed by Admin")
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
 
                 sendFeedItem(
                     targetUserId,
                     type = "alert",
                     title = "Removed from Session",
-                    message = "You were removed from '${sessionData.title}' by the host.",
+                    message = "You were removed from '$title' by the host.",
                     sessionId = sessionId
                 )
             }
@@ -374,35 +421,73 @@ class RealtimeRepository {
         }
     }
 
-    suspend fun stopSession(sessionId: String) {
+    suspend fun stopSession(sessionId: String, customReason: String? = null) {
         val userId = auth.currentUser?.uid ?: return
         try {
             val snapshot = db.child("sessions")
                 .child(sessionId)
                 .get()
                 .await()
+            if (!snapshot.exists()) return
+
             val hostId = snapshot.child("hostId")
                 .getValue(String::class.java)
 
             if (hostId == userId) {
-                val sessionDataMap = snapshot.value as? Map<String, Any>
+                val pCount = snapshot.child("users").childrenCount.toInt()
 
-                if (sessionDataMap != null) {
-                    val sessionData = sessionDataMap.toSessionData(sessionId)
-                    val usersSnapshot = snapshot.child("users")
-                    val pCount = usersSnapshot.childrenCount.toInt()
+                val sessionData = SessionData(
+                    id = sessionId,
+                    title = snapshot.child("title")
+                        .getValue(String::class.java) ?: "Unnamed Session",
+                    hostId = hostId,
+                    hostName = snapshot.child("hostName")
+                        .getValue(String::class.java) ?: "Unknown Host",
+                    fromLocation = snapshot.child("fromLocation")
+                        .getValue(String::class.java) ?: "",
+                    toLocation = snapshot.child("toLocation")
+                        .getValue(String::class.java) ?: "",
+                    startLat = snapshot.child("startLat")
+                        .getValue(Double::class.java) ?: 0.0,
+                    startLng = snapshot.child("startLng")
+                        .getValue(Double::class.java) ?: 0.0,
+                    endLat = snapshot.child("endLat")
+                        .getValue(Double::class.java) ?: 0.0,
+                    endLng = snapshot.child("endLng")
+                        .getValue(Double::class.java) ?: 0.0,
+                    createdTimestamp = snapshot.child("created")
+                        .getValue(Long::class.java) ?: 0L,
+                    durationVal = snapshot.child("durationVal")
+                        .getValue(String::class.java) ?: "2",
+                    durationUnit = snapshot.child("durationUnit")
+                        .getValue(String::class.java) ?: "Hrs",
+                    maxPeople = snapshot.child("maxPeople")
+                        .getValue(String::class.java) ?: "10",
+                    status = snapshot.child("status")
+                        .getValue(String::class.java) ?: "Ended",
+                    joinCode = snapshot.child("joinCode")
+                        .getValue(String::class.java) ?: "",
+                    isUsersVisible = snapshot.child("isUsersVisible")
+                        .getValue(Boolean::class.java) ?: true,
+                    isSharingAllowed = snapshot.child("isSharingAllowed")
+                        .getValue(Boolean::class.java) ?: true,
+                    isHostSharing = snapshot.child("isHostSharing")
+                        .getValue(Boolean::class.java) ?: true,
+                    activeUsers = pCount
+                )
 
-                    usersSnapshot.children.forEach { userSnap ->
-                        val uId = userSnap.child("id")
-                            .getValue(String::class.java)
-                        if (!uId.isNullOrEmpty()) {
-                            val reason =
-                                if (uId == userId) "You ended the session" else "Ended by Admin"
+                snapshot.child("users").children.forEach { userSnap ->
+                    val uId = userSnap.key
+                    if (!uId.isNullOrEmpty()) {
+                        val reason = customReason
+                            ?: if (uId == userId) "You ended the session" else "Ended by Admin"
+                        try {
                             archiveSessionForUser(uId, sessionData, pCount, reason)
+                        } catch (e: Exception) {
+                            e.printStackTrace()
                         }
                     }
                 }
-                // Permanently remove the session
                 db.child("sessions")
                     .child(sessionId)
                     .removeValue()
@@ -461,11 +546,14 @@ class RealtimeRepository {
 
                         val endTime = created + durationMillis
                         if (System.currentTimeMillis() > endTime) {
-                            // Session Expired -> Delete from DB
-                            db.child("sessions")
-                                .child(sessionId)
-                                .removeValue()
-                            continue // Skip adding to list
+                            val hostId = child.child("hostId")
+                                .getValue(String::class.java) ?: ""
+                            if (hostId == userId) {
+                                CoroutineScope(Dispatchers.IO).launch {
+                                    stopSession(sessionId, "Time Expired")
+                                }
+                            }
+                            continue
                         }
 
                         val hostId = child.child("hostId")
@@ -482,9 +570,8 @@ class RealtimeRepository {
                         }
 
                         if (hostId == userId || isParticipant) {
-                            val isActive =
-                                child.child("isActive")
-                                    .getValue(Boolean::class.java) ?: false
+                            val isActive = child.child("isActive")
+                                .getValue(Boolean::class.java) ?: false
                             if (isActive) {
                                 sessions.add(
                                     SessionData(
@@ -571,16 +658,33 @@ class RealtimeRepository {
                 .child(currentUser.uid)
                 .updateChildren(joinData)
                 .await()
+
             incrementUserStats(
                 currentUser.uid, distanceMeters = 0.0, timeSeconds = 0L, sessionDelta = 1
             )
+
+            val hostId = snapshot.child("hostId")
+                .getValue(String::class.java)
+            val sessionTitle = snapshot.child("title")
+                .getValue(String::class.java) ?: "your session"
+
+            if (hostId != null && hostId != currentUser.uid) {
+                sendFeedItem(
+                    targetUserId = hostId,
+                    type = "info", // Blue Info icon
+                    title = "New Participant",
+                    message = "${currentUser.displayName ?: "A user"} joined '$sessionTitle'.",
+                    sessionId = sessionId
+                )
+            }
+
             true
         } catch (e: Exception) {
             e.printStackTrace(); false
         }
     }
 
-    suspend fun updateSessionStatus(
+    fun updateSessionStatus(
         sessionId: String,
         isPaused: Boolean
     ) {
@@ -713,18 +817,76 @@ class RealtimeRepository {
 
 
     suspend fun leaveSession(sessionId: String) {
-        val userId = auth.currentUser?.uid ?: return
+        val currentUser = auth.currentUser ?: return
+        val userId = currentUser.uid
+
         try {
             val snapshot = db.child("sessions")
                 .child(sessionId)
                 .get()
                 .await()
-            val sessionDataMap = snapshot.value as? Map<String, Any>
 
-            if (sessionDataMap != null) {
-                val sessionData = sessionDataMap.toSessionData(sessionId)
+            if (snapshot.exists()) {
                 val pCount = snapshot.child("users").childrenCount.toInt()
-                archiveSessionForUser(userId, sessionData, pCount, "You left the session")
+                val title = snapshot.child("title")
+                    .getValue(String::class.java) ?: "Unnamed Session"
+                val hostId = snapshot.child("hostId")
+                    .getValue(String::class.java) ?: ""
+
+                val sessionData = SessionData(
+                    id = sessionId,
+                    title = title,
+                    hostId = hostId,
+                    hostName = snapshot.child("hostName")
+                        .getValue(String::class.java) ?: "Unknown Host",
+                    fromLocation = snapshot.child("fromLocation")
+                        .getValue(String::class.java) ?: "",
+                    toLocation = snapshot.child("toLocation")
+                        .getValue(String::class.java) ?: "",
+                    startLat = snapshot.child("startLat")
+                        .getValue(Double::class.java) ?: 0.0,
+                    startLng = snapshot.child("startLng")
+                        .getValue(Double::class.java) ?: 0.0,
+                    endLat = snapshot.child("endLat")
+                        .getValue(Double::class.java) ?: 0.0,
+                    endLng = snapshot.child("endLng")
+                        .getValue(Double::class.java) ?: 0.0,
+                    createdTimestamp = snapshot.child("created")
+                        .getValue(Long::class.java) ?: 0L,
+                    durationVal = snapshot.child("durationVal")
+                        .getValue(String::class.java) ?: "2",
+                    durationUnit = snapshot.child("durationUnit")
+                        .getValue(String::class.java) ?: "Hrs",
+                    maxPeople = snapshot.child("maxPeople")
+                        .getValue(String::class.java) ?: "10",
+                    status = snapshot.child("status")
+                        .getValue(String::class.java) ?: "Ended",
+                    joinCode = snapshot.child("joinCode")
+                        .getValue(String::class.java) ?: "",
+                    isUsersVisible = snapshot.child("isUsersVisible")
+                        .getValue(Boolean::class.java) ?: true,
+                    isSharingAllowed = snapshot.child("isSharingAllowed")
+                        .getValue(Boolean::class.java) ?: true,
+                    isHostSharing = snapshot.child("isHostSharing")
+                        .getValue(Boolean::class.java) ?: true,
+                    activeUsers = pCount
+                )
+
+                try {
+                    archiveSessionForUser(userId, sessionData, pCount, "You left the session")
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+
+                if (hostId.isNotEmpty() && hostId != userId) {
+                    sendFeedItem(
+                        targetUserId = hostId,
+                        type = "alert",
+                        title = "Participant Left",
+                        message = "${currentUser.displayName ?: "A user"} left '$title'.",
+                        sessionId = sessionId
+                    )
+                }
             }
 
             db.child("sessions")
@@ -737,6 +899,7 @@ class RealtimeRepository {
             e.printStackTrace()
         }
     }
+
 
     // Cleans up accidental zombie nodes
     suspend fun deleteMyNode(sessionId: String) {
@@ -782,7 +945,7 @@ class RealtimeRepository {
             } else {
                 num // Already in meters
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             0.0
         }
 
@@ -843,8 +1006,8 @@ class RealtimeRepository {
             }
                 .sortedByDescending { it.second }
 
-            if (allSessions.size > 10) {
-                for (i in 10 until allSessions.size) {
+            if (allSessions.size > 100) {
+                for (i in 100 until allSessions.size) {
                     recentRef.child(allSessions[i].first)
                         .removeValue()
                 }
@@ -869,7 +1032,7 @@ class RealtimeRepository {
             override fun onDataChange(snapshot: DataSnapshot) {
                 val sessions = mutableListOf<RecentSession>()
                 val now = System.currentTimeMillis()
-                val tenDaysAgo = now - (10L * 24 * 60 * 60 * 1000)
+                val thirtyDaysAgo = now - (30L * 24 * 60 * 60 * 1000)
 
                 for (child in snapshot.children) {
                     try {
@@ -877,7 +1040,7 @@ class RealtimeRepository {
                         val completedTimestamp =
                             (map["completedTimestamp"] as? Number)?.toLong() ?: 0L
 
-                        if (completedTimestamp < tenDaysAgo) {
+                        if (completedTimestamp < thirtyDaysAgo) {
                             child.ref.removeValue() // Self-cleaning
                         } else {
                             sessions.add(
@@ -903,7 +1066,6 @@ class RealtimeRepository {
                             )
                         }
                     } catch (_: Exception) {
-                        // If a node is completely broken, ignore it and let the app live!
                         child.ref.removeValue()
                     }
                 }

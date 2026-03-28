@@ -433,7 +433,7 @@ fun LocationItem(
             .fillMaxWidth()
             .clickable(
                 enabled = isLocationValid
-            ) { onNavigate() }, // ⭐ CHANGED: Made the whole row clickable instead of a button
+            ) { onNavigate() },
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
@@ -458,6 +458,15 @@ fun LocationItem(
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
+            )
+        }
+        if (isLocationValid) {
+            Spacer(modifier = Modifier.width(12.dp))
+            Icon(
+                imageVector = Icons.Default.Directions,
+                contentDescription = "Navigate",
+                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+                modifier = Modifier.size(24.dp)
             )
         }
     }

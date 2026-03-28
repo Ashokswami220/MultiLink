@@ -5,6 +5,7 @@ import HomeBanner
 import HomeSectionHeader
 import android.app.Activity
 import android.content.Intent
+import android.content.res.Configuration
 import android.os.Build
 import android.widget.Toast
 import androidx.compose.animation.core.animateDpAsState
@@ -47,18 +48,22 @@ import com.example.multilink.ui.navigation.MultiLinkTopBar
 import com.example.multilink.ui.navigation.rememberSingleClick
 import com.example.multilink.utils.NetworkMonitor
 import kotlinx.coroutines.launch
+import android.view.HapticFeedbackConstants
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.text.font.FontWeight
 
 @Composable
 fun HomeScreen(
     uiState: MultiLinkUiState,
-    onCreateSession: (SessionData, Boolean) -> Unit,
     onSessionClick: (SessionData) -> Unit,
-    onStopSession: (SessionData) -> Unit,
     onShareSession: (SessionData) -> Unit,
-    onJoinSuccess: (String) -> Unit,
     onDrawerClick: () -> Unit,
     onProfileClick: () -> Unit,
-    onJoinCodeEntered: (String) -> Unit,
     initialJoinCode: String? = null,
     onRestrictedSessionClick: () -> Unit
 ) {
@@ -78,12 +83,14 @@ fun HomeScreen(
     val context = LocalContext.current
     val density = LocalDensity.current
     val repository = remember { RealtimeRepository() }
+    val view = LocalView.current
+
+    var networkErrorTrigger by remember { mutableIntStateOf(0) }
 
     val networkMonitor = remember { NetworkMonitor(context) }
     val isOnline by networkMonitor.isOnline.collectAsState(initial = true)
 
     // FORCE STATUS BAR COLOR LOGIC
-    val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
@@ -149,13 +156,48 @@ fun HomeScreen(
         }
     }
 
+    val configuration = LocalConfiguration.current
+    val isPortrait = configuration.orientation == Configuration.ORIENTATION_PORTRAIT
+
+    val navBarHeight = with(density) {
+        WindowInsets.navigationBars.getBottom(this)
+            .toDp()
+    }
+    val isThreeButtonNav = navBarHeight > 30.dp
+
+    val baseBottomPadding = dimensionResource(id = R.dimen.padding_list_bottom)
+
+    val dynamicBottomPadding = remember(
+        isPortrait,
+        sortedSessions.size,
+        uiState.isLoading,
+        isThreeButtonNav,
+        baseBottomPadding
+    ) {
+        if (isPortrait) {
+            val extraBouncePadding = when {
+                uiState.isLoading -> 0.dp
+                sortedSessions.isEmpty() -> 110.dp
+                sortedSessions.size == 1 -> 80.dp
+                else -> 0.dp
+            }
+            val adjustment = if (isThreeButtonNav && extraBouncePadding > 0.dp) 50.dp else 0.dp
+            baseBottomPadding + (extraBouncePadding - adjustment).coerceAtLeast(0.dp)
+        } else {
+            baseBottomPadding
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
         // 1. ISOLATED BANNER COMPONENT
-        NoInternetBanner(isVisible = !isOnline)
+        NoInternetBanner(
+            isVisible = !isOnline,
+            errorTrigger = networkErrorTrigger
+        )
 
         // 2. REST OF THE APP (Pushed down when banner appears)
         Box(modifier = Modifier.weight(1f)) {
@@ -163,9 +205,7 @@ fun HomeScreen(
             // A. The List Content
             LazyColumn(
                 state = listState,
-                contentPadding = PaddingValues(
-                    bottom = dimensionResource(id = R.dimen.padding_list_bottom)
-                ),
+                contentPadding = PaddingValues(bottom = dynamicBottomPadding),
                 modifier = Modifier.fillMaxSize()
             ) {
                 item {
@@ -235,7 +275,14 @@ fun HomeScreen(
                                     )
                                 }
                             },
-                            onEditClick = { sessionToEdit = session },
+                            onEditClick = {
+                                if (isOnline) {
+                                    sessionToEdit = session
+                                } else {
+                                    view.performHapticFeedback(HapticFeedbackConstants.REJECT)
+                                    networkErrorTrigger++
+                                }
+                            },
                             onInfoClick = { sessionToInfo = session },
                             modifier = Modifier.padding(
                                 bottom = dimensionResource(id = R.dimen.padding_standard)
@@ -293,27 +340,20 @@ fun HomeScreen(
 
             // C. The FABs
             if (uiState.sessions.isNotEmpty()) {
-                Column(
+                Box(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .padding(
-                            bottom = dimensionResource(id = R.dimen.padding_fab_bottom),
-                            end = dimensionResource(id = R.dimen.padding_large)
-                        ),
-                    horizontalAlignment = Alignment.End,
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                            end = dimensionResource(id = R.dimen.padding_large),
+                            bottom = 16.dp
+                        )
                 ) {
-                    SmallFloatingActionButton(
-                        onClick = { joinDialogInitCode = null; showJoinDialog = true },
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                    ) { Icon(Icons.Default.GroupAdd, "Join") }
-
-                    FloatingActionButton(
-                        onClick = { showCreateDialog = true },
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    ) { Icon(Icons.Default.Add, "Create") }
+                    ExpandableActionFab(
+                        isOnline = isOnline,
+                        onCreateClick = { showCreateDialog = true },
+                        onJoinClick = { joinDialogInitCode = null; showJoinDialog = true },
+                        onErrorTrigger = { networkErrorTrigger++ }
+                    )
                 }
             }
 
@@ -397,6 +437,121 @@ fun HomeScreen(
 
             if (sessionToInfo != null) {
                 SessionInfoDialog(session = sessionToInfo!!, onDismiss = { sessionToInfo = null })
+            }
+        }
+    }
+}
+
+
+@Composable
+fun ExpandableActionFab(
+    isOnline: Boolean,
+    onCreateClick: () -> Unit,
+    onJoinClick: () -> Unit,
+    onErrorTrigger: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var isExpanded by remember { mutableStateOf(false) }
+    val view = LocalView.current
+
+    val contentAlpha = if (isOnline) 1f else 0.38f
+    val buttonContentColor = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = contentAlpha)
+
+    Surface(
+        modifier = modifier.animateContentSize(
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioMediumBouncy,
+                stiffness = Spring.StiffnessLow
+            )
+        ),
+        shape = RoundedCornerShape(16.dp), // M3 Standard FAB shape
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        onClick = {
+            if (!isExpanded) {
+                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                isExpanded = true
+            }
+        }
+    ) {
+        if (!isExpanded) {
+            // --- COLLAPSED STATE (Standard + FAB) ---
+            Box(
+                modifier = Modifier.size(56.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "Actions",
+                    modifier = Modifier.size(24.dp),
+                    tint = buttonContentColor
+                )
+            }
+        } else {
+            // --- EXPANDED STATE (Horizontal Pill) ---
+            Row(
+                modifier = Modifier
+                    .height(56.dp)
+                    .padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // JOIN BUTTON
+                TextButton(
+                    onClick = {
+                        if (isOnline) {
+                            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                            isExpanded = false
+                            onJoinClick()
+                        } else {
+                            view.performHapticFeedback(HapticFeedbackConstants.REJECT)
+                            isExpanded = false
+                            onErrorTrigger()
+                        }
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = buttonContentColor)
+                ) {
+                    Icon(Icons.Default.GroupAdd, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Join", fontWeight = FontWeight.Bold)
+                }
+
+                // VERTICAL DIVIDER
+                Box(
+                    modifier = Modifier
+                        .width(1.dp)
+                        .height(24.dp)
+                        .background(MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.3f))
+                )
+
+                // CREATE BUTTON
+                TextButton(
+                    onClick = {
+                        if (isOnline) {
+                            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                            isExpanded = false
+                            onCreateClick()
+                        } else {
+                            view.performHapticFeedback(HapticFeedbackConstants.REJECT)
+                            isExpanded = false
+                            onErrorTrigger()
+                        }
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = buttonContentColor)
+                ) {
+                    Icon(Icons.Default.Add, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Create", fontWeight = FontWeight.Bold)
+                }
+
+                // CLOSE BUTTON
+                IconButton(
+                    onClick = {
+                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                        isExpanded = false
+                    }
+                ) {
+                    Icon(Icons.Default.Close, "Close", modifier = Modifier.size(20.dp))
+                }
             }
         }
     }

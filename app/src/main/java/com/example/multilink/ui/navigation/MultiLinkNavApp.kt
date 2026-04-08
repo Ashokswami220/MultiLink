@@ -71,6 +71,12 @@ import com.example.multilink.utils.NetworkMonitor
 import com.google.firebase.auth.FirebaseAuth
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.haze
+import kotlinx.coroutines.launch
+import androidx.credentials.ClearCredentialStateRequest
+import androidx.credentials.CredentialManager
+import com.example.multilink.ui.otherScreens.NotificationDetailScreen
+import com.example.multilink.ui.tracker.SoloNavigationScreen
+import com.example.multilink.ui.viewmodel.ActivityViewModel
 
 const val ANIM_DURATION = 400
 val ANIM_EASING = FastOutSlowInEasing
@@ -118,11 +124,43 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
         }
     }
 
+    fun checkProfileAndNavigate() {
+        scope.launch {
+            val exists = authRepository.checkUserExists()
+            if (exists) {
+                navController.navigate(MultiLinkRoutes.HOME) {
+                    popUpTo(0) { inclusive = true }
+                }
+            } else {
+                navController.navigate(MultiLinkRoutes.COMPLETE_PROFILE) {
+                    popUpTo(0) { inclusive = true }
+                }
+            }
+        }
+    }
 
     // --- CENTRAL ACTIONS ---
 
     // UPDATED: Safely clears the stack and returns to Home
+    val handleStopSession: (String) -> Unit = { sessionId ->
+        scope.launch {
+            realtimeRepository.stopSession(sessionId)
 
+            val stopIntent = Intent(context, LocationService::class.java)
+            stopIntent.action = LocationService.ACTION_STOP
+            context.startService(stopIntent)
+
+            Toast.makeText(context, "Session Stopped", Toast.LENGTH_SHORT)
+                .show()
+
+            if (currentRoute != MultiLinkRoutes.HOME) {
+                navController.navigate(MultiLinkRoutes.HOME) {
+                    popUpTo(0) { inclusive = true }
+                    launchSingleTop = true
+                }
+            }
+        }
+    }
 
     val handleSessionTerminated: () -> Unit = {
         val stopIntent = Intent(context, LocationService::class.java)
@@ -136,6 +174,70 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
             }
         }
     }
+
+    val handleSessionPausedKick: () -> Unit = {
+        if (currentRoute != MultiLinkRoutes.HOME) {
+            navController.navigate(MultiLinkRoutes.HOME) {
+                popUpTo(0) { inclusive = true }
+                launchSingleTop = true
+            }
+        }
+    }
+
+    val onProfileClick: () -> Unit = {
+        if (currentRoute != MultiLinkRoutes.PROFILE) {
+            navController.navigate(MultiLinkRoutes.PROFILE) {
+                popUpTo(MultiLinkRoutes.HOME) { saveState = true }
+                launchSingleTop = true
+                restoreState = true
+            }
+        }
+    }
+
+    // --- NAVIGATION SETUP ---
+    val visibleTab = when (currentTab) {
+        0 -> BottomNavDest.Home
+        1 -> BottomNavDest.Activity
+        2 -> BottomNavDest.Recent
+        3 -> BottomNavDest.Settings
+        else -> BottomNavDest.Home
+    }
+
+    val onBottomTabSelected: (BottomNavDest) -> Unit = { dest ->
+        currentTab = when (dest) {
+            BottomNavDest.Home -> 0
+            BottomNavDest.Activity -> 1
+            BottomNavDest.Recent -> 2
+            BottomNavDest.Settings -> 3
+        }
+    }
+
+    if (isCheckingAuth) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    imageVector = Icons.Default.Place,
+                    contentDescription = "Logo",
+                    modifier = Modifier.size(72.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "MultiLink",
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+        return
+    }
+
     GlobalTrackingBlocker(currentRoute = currentRoute) {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             Column(modifier = Modifier.fillMaxSize()) {
@@ -364,11 +466,13 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
                                             }
                                         }
                                     }
+
                                     val topBarAlpha by animateFloatAsState(
                                         targetValue = if (currentTab > 0) 1f else 0f,
                                         animationSpec = tween(150),
                                         label = "top_bar_alpha"
                                     )
+
                                     if (topBarAlpha > 0f) {
                                         MultiLinkTopBar(
                                             modifier = Modifier.alpha(topBarAlpha),
@@ -379,6 +483,61 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
                                 }
                             }
                         }
+                    }
+
+                    // SEE ALL
+                    composable(
+                        route = "${MultiLinkRoutes.SEE_ALL}/{sessionId}",
+                        arguments = listOf(
+                            navArgument("sessionId") { type = NavType.StringType }),
+                        enterTransition = {
+                            slideInHorizontally(
+                                initialOffsetX = { it }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        },
+                        exitTransition = {
+                            slideOutHorizontally(
+                                targetOffsetX = { -it / 3 }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        },
+                        popEnterTransition = {
+                            slideInHorizontally(
+                                initialOffsetX = { -it / 3 }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        },
+                        popExitTransition = {
+                            slideOutHorizontally(
+                                targetOffsetX = { it }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        }
+                    ) { entry ->
+                        val sessionId = entry.arguments?.getString("sessionId") ?: ""
+
+                        SeeAllScreen(
+                            sessionId = sessionId,
+                            onBackClick = { navController.popBackStack() },
+                            onUserClick = { userId ->
+                                navController.navigate(
+                                    "${MultiLinkRoutes.DETAIL}/$sessionId/$userId"
+                                )
+                            },
+                            onTrackAllClick = { sid ->
+                                navController.navigate(
+                                    "${MultiLinkRoutes.LIVE_TRACKING}/$sid"
+                                )
+                            },
+                            onSessionEnded = handleSessionTerminated,
+                            onSessionPaused = handleSessionPausedKick
+
+                        )
                     }
 
                     // LIVE TRACKING SCREEN
@@ -432,6 +591,7 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
                             onSessionPaused = handleSessionPausedKick
                         )
                     }
+
                     // DETAIL SCREEN
                     composable(
                         route = "${MultiLinkRoutes.DETAIL}/{sessionId}/{userId}",
@@ -479,6 +639,209 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
                             onSessionPaused = handleSessionPausedKick
                         )
                     }
+
+                    // SOLO NAVIGATION SCREEN ROUTE
+                    composable(
+                        route = "${MultiLinkRoutes.SOLO_NAVIGATION}/{sessionId}",
+                        arguments = listOf(navArgument("sessionId") { type = NavType.StringType }),
+                        enterTransition = {
+                            slideInHorizontally(
+                                initialOffsetX = { it }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        },
+                        exitTransition = {
+                            slideOutHorizontally(
+                                targetOffsetX = { -it / 3 }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        },
+                        popEnterTransition = {
+                            slideInHorizontally(
+                                initialOffsetX = { -it / 3 }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        },
+                        popExitTransition = {
+                            slideOutHorizontally(
+                                targetOffsetX = { it }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        }
+                    ) { entry ->
+                        val sessionId = entry.arguments?.getString("sessionId") ?: ""
+                        SoloNavigationScreen(
+                            sessionId = sessionId,
+                            onBackClick = { navController.popBackStack() }
+                        )
+                    }
+
+                    // Profile screen
+                    composable(
+                        route = MultiLinkRoutes.PROFILE,
+                        enterTransition = {
+                            slideInHorizontally(
+                                initialOffsetX = { it }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        },
+                        exitTransition = {
+                            slideOutHorizontally(
+                                targetOffsetX = { -it / 3 }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        },
+                        popEnterTransition = {
+                            slideInHorizontally(
+                                initialOffsetX = { -it / 3 }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        },
+                        popExitTransition = {
+                            slideOutHorizontally(
+                                targetOffsetX = { it }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        }
+                    ) {
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            val context = LocalContext.current
+                            UserProfileScreen(
+                                onBackClick = { navController.popBackStack() },
+                                onLogout = {
+                                    scope.launch {
+                                        try {
+                                            // 1. KILL THE SERVICE
+                                            val stopIntent =
+                                                Intent(context, LocationService::class.java)
+                                            stopIntent.action = LocationService.ACTION_STOP
+                                            context.startService(stopIntent)
+
+                                            // 2. Sign out of Firebase
+                                            FirebaseAuth.getInstance()
+                                                .signOut()
+
+                                            // 3. Sign out of Google using Credential Manager API
+                                            val credentialManager =
+                                                CredentialManager.create(context)
+                                            credentialManager.clearCredentialState(
+                                                ClearCredentialStateRequest()
+                                            )
+
+                                            // 4. Safely navigate back on the UI thread using graph.id
+                                            navController.navigate(MultiLinkRoutes.LOGIN) {
+                                                popUpTo(navController.graph.id) { inclusive = true }
+                                            }
+                                        } catch (e: Exception) {
+                                            e.printStackTrace()
+                                            // Fallback navigation just in case Credential Manager fails
+                                            navController.navigate(MultiLinkRoutes.LOGIN) {
+                                                popUpTo(navController.graph.id) { inclusive = true }
+                                            }
+                                        }
+                                    }
+                                }
+                            )
+                        }
+                    }
+
+                    // RecentSessionDetailScreen
+                    composable(
+                        route = "${MultiLinkRoutes.RECENT_DETAIL}/{sessionId}",
+                        arguments = listOf(
+                            navArgument("sessionId") { type = NavType.StringType }),
+                        enterTransition = {
+                            slideInHorizontally(
+                                initialOffsetX = { it }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        },
+                        exitTransition = {
+                            slideOutHorizontally(
+                                targetOffsetX = { -it / 3 }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        },
+                        popEnterTransition = {
+                            slideInHorizontally(
+                                initialOffsetX = { -it / 3 }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        },
+                        popExitTransition = {
+                            slideOutHorizontally(
+                                targetOffsetX = { it }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        }
+                    ) { entry ->
+                        val sessionId = entry.arguments?.getString("sessionId") ?: ""
+
+                        RecentSessionDetailScreen(
+                            sessionId = sessionId,
+                            onBackClick = { navController.popBackStack() }
+                        )
+                    }
+
+                    // Notification Detail Screen
+                    composable(
+                        route = "${MultiLinkRoutes.NOTIFICATION_DETAIL}/{notificationId}",
+                        arguments = listOf(
+                            navArgument("notificationId") { type = NavType.StringType }),
+                        enterTransition = {
+                            slideInHorizontally(
+                                initialOffsetX = { it }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        },
+                        exitTransition = {
+                            slideOutHorizontally(
+                                targetOffsetX = { -it / 3 }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        },
+                        popEnterTransition = {
+                            slideInHorizontally(
+                                initialOffsetX = { -it / 3 }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        },
+                        popExitTransition = {
+                            slideOutHorizontally(
+                                targetOffsetX = { it }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        }
+                    ) { entry ->
+                        val notificationId = entry.arguments?.getString("notificationId") ?: ""
+                        val activityViewModel: ActivityViewModel = viewModel()
+
+                        NotificationDetailScreen(
+                            notificationId = notificationId,
+                            viewModel = activityViewModel,
+                            onBackClick = { navController.popBackStack() },
+                            onNavigateToLiveTracking = { sid ->
+                                navController.navigate("${MultiLinkRoutes.LIVE_TRACKING}/$sid")
+                            }
+                        )
+                    }
+
                     // INFO INPUT SCREEN
                     composable(
                         route = MultiLinkRoutes.COMPLETE_PROFILE,
@@ -550,6 +913,24 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
                             }
                         )
                     }
+
+                    composable(
+                        route = MultiLinkRoutes.RESTRICTED,
+                        enterTransition = {
+                            slideInHorizontally(
+                                initialOffsetX = { it },
+                                animationSpec = tween(ANIM_DURATION)
+                            )
+                        },
+                        exitTransition = {
+                            slideOutHorizontally(
+                                targetOffsetX = { it }, animationSpec = tween(ANIM_DURATION)
+                            )
+                        }
+                    ) {
+                        RestrictedScreen(onBackClick = { navController.popBackStack() })
+                    }
+
                     // ABOUT
                     composable(
                         route = MultiLinkRoutes.ABOUT,

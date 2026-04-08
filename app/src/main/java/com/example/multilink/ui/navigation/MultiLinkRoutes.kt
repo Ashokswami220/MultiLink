@@ -2,9 +2,6 @@ package com.example.multilink.ui.navigation
 
 object MultiLinkRoutes {
     const val HOME = "main_home"
-    const val USER = "user"
-    const val RECENT = "recent"
-    const val SETTINGS = "main_settings"
     const val SEE_ALL = "see_all_screen"
     const val DETAIL = "detail_screen"
     const val LOGIN = "login_initial"
@@ -14,4 +11,6 @@ object MultiLinkRoutes {
     const val RESTRICTED = "restricted"
     const val COMPLETE_PROFILE = "complete_profile"
     const val RECENT_DETAIL = "recent_detail"
+    const val NOTIFICATION_DETAIL = "notification_detail"
+    const val SOLO_NAVIGATION = "solo_navigation"
 }

@@ -1,5 +1,6 @@
 package com.example.multilink.ui.components
 
+import android.content.res.Configuration
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -71,11 +72,16 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import com.mapbox.maps.CameraOptions
+import com.mapbox.maps.extension.style.layers.addLayer
+import com.mapbox.maps.extension.style.layers.addLayerBelow
+import com.mapbox.maps.extension.style.sources.addSource
+import com.mapbox.maps.extension.style.sources.getSource
 
 @OptIn(MapboxExperimental::class)
 @Composable
@@ -90,9 +96,12 @@ fun MultiLinkMap(
     onMapLoaded: () -> Unit = {},
     content: (@Composable MapboxMapScope.() -> Unit)? = null,
 ) {
-    val density = LocalDensity.current
     val currentBearing = viewportState.cameraState?.bearing ?: 0.0
     val isDarkTheme = isSystemInDarkTheme()
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    var isStyleLoaded by remember { mutableStateOf(false) }
+
 
     Box(modifier = modifier.fillMaxSize()) {
         MapboxMap(
@@ -124,12 +133,14 @@ fun MultiLinkMap(
                             mapView.location.updateSettings {
                                 enabled = true
                                 pulsingEnabled = true
+                                puckBearingEnabled = true
                                 locationPuck = createDefault2DPuck(withBearing = true)
                             }
                         }
                     } catch (_: Exception) {
                     }
 
+                    isStyleLoaded = true
                     onMapLoaded()
                 }
             }
@@ -151,15 +162,52 @@ fun MultiLinkMap(
                 }
             }
 
-            // --- 3. DRAW ROUTE LINE ---
-            if (routePoints.isNotEmpty()) {
-                PolylineAnnotation(
-                    points = routePoints
-                ) {
-                    lineColor = Color(0xFF2196F3)
-                    lineWidth = 6.0
-                    lineOpacity = 1.0
-                }
+            // 3: Smart Layering - Dynamically finds the puck or labels to put the route UNDER them
+            MapEffect(routePoints, isStyleLoaded) { mapView ->
+                if (!isStyleLoaded) return@MapEffect // Wait until map is ready
+
+                mapView.mapboxMap.getStyle()
+                    ?.let { style ->
+                        val sourceId = "custom-route-source"
+                        val layerId = "custom-route-layer"
+
+                        if (routePoints.isNotEmpty()) {
+                            val lineString = com.mapbox.geojson.LineString.fromLngLats(routePoints)
+
+                            if (style.styleSourceExists(sourceId)) {
+                                val source = style.getSource(
+                                    sourceId
+                                ) as? com.mapbox.maps.extension.style.sources.generated.GeoJsonSource
+                                source?.geometry(lineString)
+                            } else {
+                                val source =
+                                    com.mapbox.maps.extension.style.sources.generated.GeoJsonSource.Builder(
+                                        sourceId
+                                    )
+                                        .geometry(lineString)
+                                        .build()
+                                style.addSource(source)
+
+                                val layer =
+                                    com.mapbox.maps.extension.style.layers.generated.LineLayer(
+                                        layerId, sourceId
+                                    )
+                                        .lineColor("#2196F3")
+                                        .lineWidth(6.0)
+                                        .lineOpacity(1.0)
+
+                                // Explicitly place the route line underneath the location puck
+                                if (style.styleLayerExists("mapbox-location-indicator-layer")) {
+                                    style.addLayerBelow(layer, "mapbox-location-indicator-layer")
+                                } else {
+                                    style.addLayer(layer)
+                                }
+                            }
+                        } else {
+                            if (style.styleLayerExists(layerId)) style.removeStyleLayer(layerId)
+                            if (style.styleSourceExists(sourceId)) style.removeStyleSource(sourceId)
+                        }
+                    }
             }
 
             // --- 4. CUSTOM MARKERS ---
@@ -174,7 +222,10 @@ fun MultiLinkMap(
             exit = fadeOut(),
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(top = 140.dp, end = 8.dp)
+                .padding(
+                    top = if (isLandscape) 40.dp else 180.dp,
+                    end = 8.dp
+                )
         ) {
             SmallFloatingActionButton(
                 onClick = {

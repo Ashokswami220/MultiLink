@@ -1,10 +1,8 @@
 package com.example.multilink.ui.main
 
 import android.widget.Toast
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -17,12 +15,8 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -30,9 +24,6 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DirectionsRun
@@ -56,12 +47,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -76,10 +63,9 @@ import java.util.Locale
 import kotlin.math.absoluteValue
 import kotlin.math.roundToInt
 import com.airbnb.lottie.compose.*
-import android.view.HapticFeedbackConstants
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.IntOffset
@@ -87,72 +73,31 @@ import androidx.compose.ui.unit.sp
 import com.example.multilink.R
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import com.example.multilink.utils.HapticHelper
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 
 @Composable
 fun ActivityScreen(
     viewModel: ActivityViewModel = viewModel(),
-    onNavigateToLiveTracking: (String) -> Unit = {}
+    onNavigateToLiveTracking: (String) -> Unit = {},
+    onNavigateToNotificationDetail: (String) -> Unit = {}
 ) {
-    var mainTab by remember { mutableIntStateOf(kotlin.random.Random.nextInt(0, 2)) }
-    val view = LocalView.current
+    val dashboardScrollState = rememberScrollState()
+    val inboxScrollState = rememberScrollState()
 
-    val dashboardScrollState = rememberLazyListState()
-    val inboxScrollState = rememberLazyListState()
-    val currentScrollState = if (mainTab == 0) dashboardScrollState else inboxScrollState
-
-    var isFabExpanded by remember { mutableStateOf(true) }
-
-    LaunchedEffect(currentScrollState.firstVisibleItemIndex) {
-        if (currentScrollState.firstVisibleItemIndex == 0) {
-            isFabExpanded = true
-        }
-    }
-
-    val nestedScrollConnection = remember {
-        object : NestedScrollConnection {
-            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (available.y < -10f) {
-                    isFabExpanded = false
-                } else if (available.y > 10f) {
-                    isFabExpanded = true
-                }
-                return Offset.Zero
-            }
-        }
-    }
+    val startPage = remember { kotlin.random.Random.nextInt(0, 2) }
+    val pagerState = rememberPagerState(
+        initialPage = startPage,
+        pageCount = { 2 }
+    )
+    val coroutineScope = rememberCoroutineScope()
 
     Scaffold(
-        modifier = Modifier
-            .fillMaxSize()
-            .nestedScroll(nestedScrollConnection),
-        contentWindowInsets = WindowInsets(0.dp),
-        floatingActionButton = {
-            ExtendedFloatingActionButton(
-                expanded = isFabExpanded,
-                onClick = {
-                    view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-                    mainTab = if (mainTab == 0) 1 else 0
-                },
-                icon = {
-                    Icon(
-                        imageVector = if (mainTab == 0) Icons.Default.Notifications else Icons.Default.SpaceDashboard,
-                        contentDescription = null
-                    )
-                },
-                text = {
-                    Text(
-                        text = if (mainTab == 0) "Go to Inbox" else "Go to Dashboard",
-                        style = MaterialTheme.typography.labelLarge.copy(
-                            fontWeight = FontWeight.Bold
-                        )
-                    )
-                },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                shape = RoundedCornerShape(16.dp)
-            )
-        },
-        floatingActionButtonPosition = FabPosition.End
+        modifier = Modifier.fillMaxSize(),
+        contentWindowInsets = WindowInsets(0.dp)
     ) { paddingValues ->
 
         Column(
@@ -161,23 +106,26 @@ fun ActivityScreen(
                 .padding(bottom = paddingValues.calculateBottomPadding())
                 .padding(top = 8.dp)
         ) {
-            MasterViewSwitcher(selectedTab = mainTab) { mainTab = it }
+            MasterViewSwitcher(selectedTab = pagerState.targetPage) { selectedPage ->
+                coroutineScope.launch {
+                    pagerState.animateScrollToPage(selectedPage)
+                }
+            }
+
             Spacer(modifier = Modifier.height(8.dp))
 
-            AnimatedContent(
-                targetState = mainTab,
-                modifier = Modifier.weight(1f),
-                transitionSpec = {
-                    (fadeIn(tween(300)) + scaleIn(tween(300), initialScale = 0.95f))
-                        .togetherWith(
-                            fadeOut(tween(300)) + scaleOut(tween(300), targetScale = 0.95f)
-                        )
-                },
-                label = "main_view_switch"
-            ) { targetTab ->
-                when (targetTab) {
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.weight(1f)
+            ) { page ->
+                when (page) {
                     0 -> DashboardSection(viewModel, dashboardScrollState)
-                    1 -> InboxSection(viewModel, inboxScrollState, onNavigateToLiveTracking)
+                    1 -> InboxSection(
+                        viewModel = viewModel,
+                        scrollState = inboxScrollState,
+                        onNavigateToLiveTracking = onNavigateToLiveTracking,
+                        onNavigateToNotificationDetail = onNavigateToNotificationDetail
+                    )
                 }
             }
         }
@@ -187,7 +135,7 @@ fun ActivityScreen(
 @Composable
 fun MasterViewSwitcher(selectedTab: Int, onTabSelected: (Int) -> Unit) {
     val tabs = listOf("Dashboard", "Inbox")
-    val view = LocalView.current
+    val context = LocalContext.current
 
     BoxWithConstraints(
         modifier = Modifier
@@ -229,9 +177,9 @@ fun MasterViewSwitcher(selectedTab: Int, onTabSelected: (Int) -> Unit) {
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null
                         ) {
-                            if (selectedTab != index) view.performHapticFeedback(
-                                HapticFeedbackConstants.CLOCK_TICK
-                            )
+                            if (selectedTab != index) {
+                                HapticHelper.trigger(context, HapticHelper.Type.LIGHT)
+                            }
                             onTabSelected(index)
                         },
                     contentAlignment = Alignment.Center
@@ -248,7 +196,9 @@ fun MasterViewSwitcher(selectedTab: Int, onTabSelected: (Int) -> Unit) {
 }
 
 @Composable
-fun DashboardSection(viewModel: ActivityViewModel, scrollState: LazyListState) {
+fun DashboardSection(
+    viewModel: ActivityViewModel, scrollState: ScrollState
+) {
     val stats by viewModel.userStats.collectAsState()
     val labels by viewModel.graphLabels.collectAsState()
 
@@ -281,58 +231,68 @@ fun DashboardSection(viewModel: ActivityViewModel, scrollState: LazyListState) {
         }
     }
 
-    LazyColumn(
-        state = scrollState,
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 32.dp)
-    ) {
-        item {
-            InteractiveSparklineGraph(
-                data = activeData, labels = labels, themeColor = themeColor,
-                valueFormatter = formatValue
-            )
-            Spacer(modifier = Modifier.height(16.dp))
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val minScrollHeight = this.maxHeight + 1.dp
 
-            AppleStyleTabSwitcher(graphTab, themeColor) { graphTab = it }
-            Spacer(modifier = Modifier.height(32.dp))
-
-            Text(
-                text = "All-Time Milestones",
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-
-            val distanceFloat = (stats.totalDistanceMeters / 1000.0).toFloat()
-            val minutesFloat = (stats.totalTimeSeconds / 60).toFloat()
-            val sessionsFloat = stats.totalSessions.toFloat()
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(scrollState)
+        ) {
+            // Apply the +1dp height and padding directly to the inner container
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = minScrollHeight)
+                    .padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 16.dp)
             ) {
-                LifetimeStatCard(
-                    Modifier.weight(1f), Icons.Default.Explore, "Distance", distanceFloat,
-                    { String.format(Locale.getDefault(), "%.1f", it) }, "km", Color(0xFF10B981),
-                    StatCardType.DISTANCE
+                InteractiveSparklineGraph(
+                    data = activeData, labels = labels, themeColor = themeColor,
+                    valueFormatter = formatValue
                 )
-                LifetimeStatCard(
-                    Modifier.weight(1f), Icons.Default.HourglassBottom, "Time", minutesFloat, {
-                        val h = (it / 60).toInt()
-                        val m = (it % 60).toInt()
-                        if (h > 0) "${h}h ${m}m" else "${m}m"
-                    }, "", Color(0xFFF59E0B), StatCardType.TIME
-                )
-                LifetimeStatCard(
-                    Modifier.weight(1f), Icons.Default.EmojiEvents, "Sessions", sessionsFloat, {
-                        it.toInt()
-                            .toString()
-                    }, "total", MaterialTheme.colorScheme.primary, StatCardType.SESSIONS
-                )
-            }
+                Spacer(modifier = Modifier.height(16.dp))
 
-            Spacer(modifier = Modifier.height(24.dp))
-            LottieFidgetWidget()
+                AppleStyleTabSwitcher(graphTab, themeColor) { graphTab = it }
+                Spacer(modifier = Modifier.height(32.dp))
+
+                Text(
+                    text = "All-Time Milestones",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+
+                val distanceFloat = (stats.totalDistanceMeters / 1000.0).toFloat()
+                val minutesFloat = (stats.totalTimeSeconds / 60).toFloat()
+                val sessionsFloat = stats.totalSessions.toFloat()
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    LifetimeStatCard(
+                        Modifier.weight(1f), Icons.Default.Explore, "Distance", distanceFloat,
+                        { String.format(Locale.getDefault(), "%.1f", it) }, "km", Color(0xFF10B981),
+                        StatCardType.DISTANCE
+                    )
+                    LifetimeStatCard(
+                        Modifier.weight(1f), Icons.Default.HourglassBottom, "Time", minutesFloat, {
+                            val h = (it / 60).toInt()
+                            val m = (it % 60).toInt()
+                            if (h > 0) "${h}h ${m}m" else "${m}m"
+                        }, "", Color(0xFFF59E0B), StatCardType.TIME
+                    )
+                    LifetimeStatCard(
+                        Modifier.weight(1f), Icons.Default.EmojiEvents, "Sessions", sessionsFloat, {
+                            it.toInt()
+                                .toString()
+                        }, "total", MaterialTheme.colorScheme.primary, StatCardType.SESSIONS
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+                LottieFidgetWidget()
+            }
         }
     }
 }
@@ -340,13 +300,13 @@ fun DashboardSection(viewModel: ActivityViewModel, scrollState: LazyListState) {
 
 @Composable
 fun InboxSection(
-    viewModel: ActivityViewModel, scrollState: LazyListState,
-    onNavigateToLiveTracking: (String) -> Unit
+    viewModel: ActivityViewModel,
+    scrollState: ScrollState,
+    onNavigateToLiveTracking: (String) -> Unit,
+    onNavigateToNotificationDetail: (String) -> Unit
 ) {
     val feed by viewModel.activityFeed.collectAsState()
     val context = LocalContext.current
-    val density = LocalDensity.current
-    val configuration = LocalConfiguration.current
 
     val groupedFeed = remember(feed) {
         val groups = mutableListOf<List<ActivityFeedItem>>()
@@ -363,39 +323,21 @@ fun InboxSection(
         groups
     }
 
-    val navBarHeight = with(density) {
-        WindowInsets.navigationBars.getBottom(this)
-            .toDp()
-    }
-    val isThreeButtonNav = navBarHeight > 30.dp
-    val isPortrait =
-        configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val minScrollHeight = this.maxHeight + 1.dp
 
-    val dynamicBottomPadding = remember(feed.size, isPortrait, isThreeButtonNav) {
-        val baseClearance = 70.dp
-        if (isPortrait) {
-            val bouncePadding = when (feed.size) {
-                1 -> 480.dp
-                2 -> 360.dp
-                3 -> 235.dp
-                4 -> 115.dp
-                else -> 0.dp
-            }
-            val adjustment = if (isThreeButtonNav) 50.dp else 0.dp
-            baseClearance + (bouncePadding - adjustment).coerceAtLeast(0.dp)
-        } else {
-            baseClearance
-        }
-    }
-
-    Box(modifier = Modifier.fillMaxSize()) {
-        LazyColumn(
-            state = scrollState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(top = 8.dp, bottom = dynamicBottomPadding)
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(scrollState)
         ) {
-            if (feed.isEmpty()) {
-                item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = minScrollHeight)
+                    .padding(top = 8.dp, bottom = 80.dp)
+            ) {
+                if (feed.isEmpty()) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -433,141 +375,141 @@ fun InboxSection(
                             }
                         }
                     }
-                }
-            } else {
-                groupedFeed.forEach { sessionItems ->
-                    // ⭐ By wrapping the Header + Cards inside a single 'item', they can animate together!
-                    item(key = "group_${sessionItems.first().id}") {
-                        var isGroupDeleting by remember { mutableStateOf(false) }
-                        val scope = rememberCoroutineScope()
+                } else {
+                    groupedFeed.forEach { sessionItems ->
+                        key("group_${sessionItems.first().id}") {
+                            var isGroupDeleting by remember { mutableStateOf(false) }
+                            val scope = rememberCoroutineScope()
 
-                        AnimatedVisibility(
-                            visible = !isGroupDeleting,
-                            enter = slideInVertically(
-                                initialOffsetY = { it / 2 },
-                                animationSpec = spring(dampingRatio = 0.7f)
-                            ) + fadeIn(),
-                            exit = slideOutHorizontally(
-                                targetOffsetX = { -it }, animationSpec = tween(300)
-                            ) +
-                                    shrinkVertically(
-                                        animationSpec = tween(300, delayMillis = 150)
-                                    ) + fadeOut(tween(300))
-                        ) {
-                            Column {
-                                val firstItem = sessionItems.first()
-                                val start = firstItem.message.indexOf("'")
-                                val end = firstItem.message.lastIndexOf("'")
-                                val sessionName = if (start != -1 && end != -1 && start < end) {
-                                    firstItem.message.substring(start + 1, end)
-                                } else {
-                                    "Session Updates"
-                                }
+                            AnimatedVisibility(
+                                visible = !isGroupDeleting,
+                                enter = slideInVertically(
+                                    initialOffsetY = { it / 2 },
+                                    animationSpec = spring(dampingRatio = 0.7f)
+                                ) + fadeIn(),
+                                exit = slideOutHorizontally(
+                                    targetOffsetX = { -it }, animationSpec = tween(300)
+                                ) + shrinkVertically(
+                                    animationSpec = tween(300, delayMillis = 150)
+                                ) + fadeOut(tween(300))
+                            ) {
+                                Column {
+                                    val firstItem = sessionItems.first()
+                                    val start = firstItem.message.indexOf("'")
+                                    val end = firstItem.message.lastIndexOf("'")
+                                    val sessionName = if (start != -1 && end != -1 && start < end) {
+                                        firstItem.message.substring(start + 1, end)
+                                    } else {
+                                        "Session Updates"
+                                    }
 
-                                // HEADER
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 24.dp)
-                                        .padding(top = 20.dp, bottom = 4.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = sessionName,
-                                            style = MaterialTheme.typography.titleMedium.copy(
-                                                fontWeight = FontWeight.ExtraBold
-                                            ),
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                            maxLines = 1, overflow = TextOverflow.Ellipsis
-                                        )
-                                        if (sessionItems.size > 1) {
+                                    // HEADER
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 24.dp)
+                                            .padding(top = 20.dp, bottom = 4.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
                                             Text(
-                                                text = "${sessionItems.size} notifications",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                text = sessionName,
+                                                style = MaterialTheme.typography.titleMedium.copy(
+                                                    fontWeight = FontWeight.ExtraBold
+                                                ),
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                maxLines = 1, overflow = TextOverflow.Ellipsis
                                             )
-                                        }
-                                    }
-
-                                    // CLOSE ALL BUTTON
-                                    Surface(
-                                        onClick = {
-                                            scope.launch {
-                                                isGroupDeleting = true
-                                                delay(
-                                                    300
-                                                ) // Wait for slide-left animation to finish
-                                                sessionItems.forEach { viewModel.deleteItem(it.id) }
+                                            if (sessionItems.size > 1) {
+                                                Text(
+                                                    text = "${sessionItems.size} notifications",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
                                             }
-                                        },
-                                        shape = CircleShape,
-                                        color = MaterialTheme.colorScheme.errorContainer,
-                                        modifier = Modifier.size(28.dp)
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Icon(
-                                                Icons.Default.Close,
-                                                contentDescription = "Clear All",
-                                                modifier = Modifier.size(16.dp),
-                                                tint = MaterialTheme.colorScheme.onErrorContainer
-                                            )
                                         }
-                                    }
-                                }
 
-                                // CARDS (Flat List)
-                                sessionItems.forEachIndexed { index, item ->
-                                    var isItemDeleting by remember { mutableStateOf(false) }
-
-                                    AnimatedVisibility(
-                                        visible = !isItemDeleting,
-                                        enter = fadeIn(),
-                                        // ⭐ Single Item Goes Left & Shrinks
-                                        exit = slideOutHorizontally(
-                                            targetOffsetX = { -it }, animationSpec = tween(300)
-                                        ) +
-                                                shrinkVertically(
-                                                    animationSpec = tween(300, delayMillis = 150)
-                                                ) + fadeOut(tween(300))
-                                    ) {
-                                        FeedItemCard(
-                                            item = item,
-                                            isLast = index == sessionItems.size - 1,
-                                            onAccept = {
-                                                viewModel.acceptInvite(
-                                                    item.sessionId, item.id
-                                                ) { success ->
-                                                    if (success) {
-                                                        Toast.makeText(
-                                                            context, "Joined successfully!",
-                                                            Toast.LENGTH_SHORT
+                                        // CLOSE ALL BUTTON
+                                        Surface(
+                                            onClick = {
+                                                scope.launch {
+                                                    isGroupDeleting = true
+                                                    delay(300)
+                                                    sessionItems.forEach {
+                                                        viewModel.deleteItem(
+                                                            it.id
                                                         )
-                                                            .show()
-                                                        onNavigateToLiveTracking(item.sessionId)
-                                                    } else {
-                                                        Toast.makeText(
-                                                            context, "Failed to join session",
-                                                            Toast.LENGTH_SHORT
-                                                        )
-                                                            .show()
                                                     }
                                                 }
                                             },
-                                            onDismiss = {
-                                                scope.launch {
-                                                    // If this is the LAST item in the group, animate the whole group away so the header doesn't just awkwardly disappear!
-                                                    if (sessionItems.size == 1) {
-                                                        isGroupDeleting = true
-                                                    } else {
-                                                        isItemDeleting = true
-                                                    }
-                                                    delay(300)
-                                                    viewModel.deleteItem(item.id)
-                                                }
+                                            shape = CircleShape,
+                                            color = MaterialTheme.colorScheme.errorContainer,
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    Icons.Default.Close,
+                                                    contentDescription = "Clear All",
+                                                    modifier = Modifier.size(16.dp),
+                                                    tint = MaterialTheme.colorScheme.onErrorContainer
+                                                )
                                             }
-                                        )
+                                        }
+                                    }
+
+                                    // CARDS (Flat List)
+                                    sessionItems.forEachIndexed { index, item ->
+                                        var isItemDeleting by remember { mutableStateOf(false) }
+
+                                        AnimatedVisibility(
+                                            visible = !isItemDeleting,
+                                            enter = fadeIn(),
+                                            exit = slideOutHorizontally(
+                                                targetOffsetX = { -it }, animationSpec = tween(300)
+                                            ) + shrinkVertically(
+                                                animationSpec = tween(300, delayMillis = 150)
+                                            ) + fadeOut(tween(300))
+                                        ) {
+                                            FeedItemCard(
+                                                item = item,
+                                                isLast = index == sessionItems.size - 1,
+                                                onClick = {
+                                                    onNavigateToNotificationDetail(item.id)
+                                                },
+                                                onAccept = {
+                                                    viewModel.acceptInvite(
+                                                        item.sessionId, item.id
+                                                    ) { success ->
+                                                        if (success) {
+                                                            Toast.makeText(
+                                                                context, "Joined successfully!",
+                                                                Toast.LENGTH_SHORT
+                                                            )
+                                                                .show()
+                                                            onNavigateToLiveTracking(item.sessionId)
+                                                        } else {
+                                                            Toast.makeText(
+                                                                context, "Failed to join session",
+                                                                Toast.LENGTH_SHORT
+                                                            )
+                                                                .show()
+                                                        }
+                                                    }
+                                                },
+                                                onDismiss = {
+                                                    scope.launch {
+                                                        if (sessionItems.size == 1) {
+                                                            isGroupDeleting = true
+                                                        } else {
+                                                            isItemDeleting = true
+                                                        }
+                                                        delay(300)
+                                                        viewModel.deleteItem(item.id)
+                                                    }
+                                                }
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -579,13 +521,14 @@ fun InboxSection(
     }
 }
 
-// Flat Design Card
+
 @Composable
 fun FeedItemCard(
     item: ActivityFeedItem,
     isLast: Boolean,
+    onClick: () -> Unit,
     onAccept: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
 ) {
     val timeAgo = remember(item.timestamp) {
         val diff = System.currentTimeMillis() - item.timestamp
@@ -628,7 +571,10 @@ fun FeedItemCard(
         )
     }
 
-    Column(modifier = Modifier.fillMaxWidth()) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -739,11 +685,15 @@ enum class StatCardType { DISTANCE, TIME, SESSIONS }
 
 @Composable
 fun LifetimeStatCard(
-    modifier: Modifier = Modifier, icon: ImageVector, label: String,
-    targetValue: Float, valueFormatter: (Float) -> String, unit: String,
-    glowColor: Color, type: StatCardType
+    modifier: Modifier = Modifier,
+    icon: ImageVector, label: String,
+    targetValue: Float,
+    valueFormatter: (Float) -> String,
+    unit: String,
+    glowColor: Color,
+    type: StatCardType
 ) {
-    val view = LocalView.current
+    val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     var isAnimating by remember { mutableStateOf(false) }
 
@@ -759,7 +709,8 @@ fun LifetimeStatCard(
         ) {
             if (isAnimating) return@clickable
             isAnimating = true
-            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+
+            HapticHelper.trigger(context, HapticHelper.Type.LIGHT)
 
             coroutineScope.launch {
                 val targetRot = 360f * 3f
@@ -775,7 +726,9 @@ fun LifetimeStatCard(
             coroutineScope.launch {
                 animatedNumber.snapTo(0f)
                 animatedNumber.animateTo(targetValue, tween(1500, easing = FastOutSlowInEasing))
-                view.performHapticFeedback(HapticFeedbackConstants.REJECT)
+
+                HapticHelper.trigger(context, HapticHelper.Type.HEAVY)
+
                 isAnimating = false
             }
         },
@@ -920,15 +873,13 @@ fun InteractiveSparklineGraph(
 ) {
     val containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
     val labelColor = MaterialTheme.colorScheme.onSurfaceVariant.toArgb()
-    val view = LocalView.current
     val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     val animationProgress = remember { Animatable(0f) }
 
     var touchX by remember { mutableFloatStateOf(-1f) }
     var selectedIndex by remember { mutableIntStateOf(-1) }
-    var isPressed by remember { mutableStateOf(false) }
-    var componentWidth by remember { mutableFloatStateOf(1f) }
 
     var targetBirdX by remember { mutableFloatStateOf(0f) }
     var isFacingRight by remember { mutableStateOf(true) }
@@ -974,17 +925,14 @@ fun InteractiveSparklineGraph(
     LaunchedEffect(data) {
         touchX = -1f; selectedIndex = -1; isFacingRight = true
         animationProgress.snapTo(0f); animationProgress.animateTo(
-        1f, tween(
-            1000, easing = FastOutSlowInEasing
-        )
+        1f, tween(1000, easing = FastOutSlowInEasing)
     )
     }
 
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .height(280.dp)
-            .onGloballyPositioned { componentWidth = it.size.width.toFloat() },
+            .height(280.dp), // ⭐ FIXED: Removed unused onGloballyPositioned modifier
         shape = RoundedCornerShape(24.dp), color = containerColor,
         shadowElevation = 4.dp
     ) {
@@ -1028,31 +976,31 @@ fun InteractiveSparklineGraph(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
+                    // ⭐ FIXED: Removed unused variable assignments in pointer input
                     .pointerInput(data) {
                         detectTapGestures(
                             onPress = {
-                                isPressed = true; touchX = it.x
+                                touchX = it.x
                                 if (tryAwaitRelease()) {
-                                    isPressed = false; touchX = -1f; selectedIndex =
-                                        -1; isFacingRight = true
+                                    touchX = -1f; selectedIndex = -1; isFacingRight = true
                                 }
                             }
                         )
                     }
                     .pointerInput(data) {
                         detectHorizontalDragGestures(
-                            onDragStart = { isPressed = true; touchX = it.x },
+                            onDragStart = { touchX = it.x },
                             onDragEnd = {
-                                isPressed = false; touchX = -1f; selectedIndex = -1; isFacingRight =
-                                true
+                                touchX = -1f; selectedIndex = -1; isFacingRight = true
                             },
                             onDragCancel = {
-                                isPressed = false; touchX = -1f; selectedIndex = -1; isFacingRight =
-                                true
+                                touchX = -1f; selectedIndex = -1; isFacingRight = true
                             },
                             onHorizontalDrag = { change, _ ->
-                                val currX = change.position.x; if (currX > touchX) isFacingRight =
-                                true else if (currX < touchX) isFacingRight = false; touchX = currX
+                                val currX = change.position.x
+                                if (currX > touchX) isFacingRight = true
+                                else if (currX < touchX) isFacingRight = false
+                                touchX = currX
                             }
                         )
                     }
@@ -1071,9 +1019,8 @@ fun InteractiveSparklineGraph(
                         val newIndex = ((touchX - graphPaddingLeft) / xStep).roundToInt()
                             .coerceIn(0, data.size - 1)
                         if (newIndex != selectedIndex) {
-                            selectedIndex = newIndex; view.performHapticFeedback(
-                                HapticFeedbackConstants.CLOCK_TICK
-                            )
+                            selectedIndex = newIndex
+                            HapticHelper.trigger(context, HapticHelper.Type.LIGHT)
                         }
                     }
 
@@ -1267,9 +1214,9 @@ fun InteractiveSparklineGraph(
 
 @Composable
 fun LottieFidgetWidget(modifier: Modifier = Modifier) {
-    val view = LocalView.current
     val coroutineScope = rememberCoroutineScope()
     val density = LocalDensity.current
+    val context = LocalContext.current
 
     val composition by rememberLottieComposition(LottieCompositionSpec.RawRes(R.raw.dashboard_anim))
 
@@ -1288,7 +1235,7 @@ fun LottieFidgetWidget(modifier: Modifier = Modifier) {
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .height(80.dp),
+            .height(60.dp),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
@@ -1310,21 +1257,13 @@ fun LottieFidgetWidget(modifier: Modifier = Modifier) {
                                 isRunning = true
 
                                 // --- 1. START HAPTIC ---
-                                // A distinct, positive click to initiate the run
-                                view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                                HapticHelper.trigger(context, HapticHelper.Type.MEDIUM)
 
                                 // --- 2. FOOTSTEP HAPTICS LOOP ---
-                                // We launch a separate mini-job that runs at the same time as the animation
                                 val footstepsJob = launch {
-                                    delay(150) // Wait a tiny bit before the first footstep
+                                    delay(150)
                                     while (isActive && isRunning) {
-                                        // Light tick for footsteps
-                                        view.performHapticFeedback(
-                                            HapticFeedbackConstants.CLOCK_TICK
-                                        )
-
-                                        // TUNE THIS: Change 180L to match the speed of his little legs!
-                                        // Lower = faster footsteps, Higher = slower footsteps
+                                        HapticHelper.trigger(context, HapticHelper.Type.LIGHT)
                                         delay(180L)
                                     }
                                 }
@@ -1353,11 +1292,10 @@ fun LottieFidgetWidget(modifier: Modifier = Modifier) {
 
                                 // --- 4. STOP & CLEANUP ---
                                 isRunning = false
-                                footstepsJob.cancel() // Stop the footstep loop
+                                footstepsJob.cancel()
 
                                 // --- 5. STOP HAPTIC ---
-                                // A heavy "thud" when he parks back in his spot
-                                view.performHapticFeedback(HapticFeedbackConstants.REJECT)
+                                HapticHelper.trigger(context, HapticHelper.Type.HEAVY)
                             }
                         }
                     )
@@ -1369,9 +1307,8 @@ fun LottieFidgetWidget(modifier: Modifier = Modifier) {
                 modifier = Modifier
                     .offset { IntOffset(offsetX.value.roundToInt(), 0) }
                     .size(80.dp)
-                    // FIX FOR THE SCREENSHOT: This zooms the character in so he fills the space!
                     .graphicsLayer {
-                        val zoomScale = 1.9f // Increase this if he is still too small!
+                        val zoomScale = 1.7f
                         scaleX = zoomScale
                         scaleY = zoomScale
                     }

@@ -10,10 +10,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.Group
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.MyLocation
+import androidx.compose.material.icons.outlined.Navigation
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -51,6 +53,8 @@ fun SessionCard(
     onResumeClick: () -> Unit,
     onEditClick: () -> Unit,
     onInfoClick: () -> Unit,
+    onNavigateClick: () -> Unit,
+    onArrivedClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -65,6 +69,8 @@ fun SessionCard(
 
     val canShare = isAdmin || data.isSharingAllowed
     val isPaused = data.status == "Paused"
+    val isArrivalEnabled = data.isArrivalTrackingEnabled
+    val hasDest = data.endLat != null && data.endLat != 0.0
     val statusColor = if (isPaused) Color(0xFFFF9800) else Color(0xFF4CAF50)
     val statusText = if (isPaused) "PAUSED" else "LIVE"
 
@@ -176,54 +182,22 @@ fun SessionCard(
             // Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        data.title.replaceFirstChar { it.uppercase() },
-                        style = MaterialTheme.typography.titleLarge.copy(
-                            fontWeight = FontWeight.Bold
-                        ), color = MaterialTheme.colorScheme.onSurface, maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    if (data.joinCode.isNotEmpty() && canShare) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Surface(
-                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .clickable {
-                                            clipboardManager.setText(
-                                                AnnotatedString(data.joinCode)
-                                            ); Toast.makeText(
-                                            context, "Code Copied", Toast.LENGTH_SHORT
-                                        )
-                                            .show()
-                                        }
-                                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "Code: ${data.joinCode}",
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            fontFamily = FontFamily.Monospace,
-                                            fontWeight = FontWeight.SemiBold
-                                        ), color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Icon(
-                                        Icons.Default.ContentCopy, "Copy", Modifier.size(14.dp),
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
+                Text(
+                    data.title.replaceFirstChar { it.uppercase() },
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontWeight = FontWeight.Bold
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f) // Takes up remaining space
+                )
+
                 Spacer(modifier = Modifier.width(8.dp))
+
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Surface(
                         color = if (isAdmin) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer,
@@ -260,6 +234,66 @@ fun SessionCard(
                                 text = statusText, style = MaterialTheme.typography.labelSmall.copy(
                                     fontWeight = FontWeight.ExtraBold, fontSize = 11.sp
                                 ), color = statusColor
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (data.joinCode.isNotEmpty() && canShare) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .clickable {
+                                    clipboardManager.setText(
+                                        AnnotatedString(data.joinCode)
+                                    )
+                                    Toast.makeText(context, "Code Copied", Toast.LENGTH_SHORT)
+                                        .show()
+                                }
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Code: ${data.joinCode}",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.SemiBold
+                                ), color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Icon(
+                                Icons.Default.ContentCopy, "Copy", Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+
+                    if (isAdmin && !data.isSharingAllowed) {
+                        Spacer(modifier = Modifier.weight(1f))
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Outlined.Block,
+                                contentDescription = "Sharing Disabled",
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Sharing Disabled",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = MaterialTheme.colorScheme.error
                             )
                         }
                     }
@@ -416,9 +450,9 @@ fun SessionCard(
                         }
                     } else {
                         // Admin & Live -> SHARE + PAUSE
-                        if (canShare) {
+                        if (isArrivalEnabled && data.isHostSharing) {
                             Button(
-                                onClick = onShareClick,
+                                onClick = onArrivedClick,
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(44.dp),
@@ -426,35 +460,98 @@ fun SessionCard(
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = MaterialTheme.colorScheme.primaryContainer,
                                     contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                ),
+                                contentPadding = PaddingValues(horizontal = 4.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.TaskAlt,
+                                    null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    "Reached Dest",
+                                    style = MaterialTheme.typography.labelMedium.copy(
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Button(
+                                onClick = onPauseClick,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(44.dp),
+                                shape = RoundedCornerShape(16.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary
                                 )
                             ) {
-                                Icon(Icons.Default.Share, null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
+                                Icon(
+                                    Icons.Default.Pause,
+                                    null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    "Share", style = MaterialTheme.typography.labelMedium.copy(
+                                    "Pause",
+                                    style = MaterialTheme.typography.labelMedium.copy(
                                         fontWeight = FontWeight.Bold
                                     )
                                 )
                             }
-                            Spacer(modifier = Modifier.width(12.dp))
-                        }
-                        Button(
-                            onClick = onPauseClick,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(44.dp),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.primary
-                            )
-                        ) {
-                            Icon(Icons.Default.Pause, null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                "Pause", style = MaterialTheme.typography.labelMedium.copy(
-                                    fontWeight = FontWeight.Bold
+                        } else {
+                            if (canShare) {
+                                Button(
+                                    onClick = onShareClick,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(44.dp),
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                ) {
+                                    Icon(
+                                        Icons.Default.Share,
+                                        null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        "Share",
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                            }
+                            Button(
+                                onClick = onPauseClick,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(44.dp), shape = RoundedCornerShape(16.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary
                                 )
-                            )
+                            ) {
+                                Icon(
+                                    Icons.Default.Pause,
+                                    null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    "Pause",
+                                    style = MaterialTheme.typography.labelMedium.copy(
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                )
+                            }
                         }
                     }
                 } else {
@@ -476,9 +573,10 @@ fun SessionCard(
                             )
                         }
                     } else {
-                        if (canShare) {
+                        if (isArrivalEnabled) {
+                            // Reached Dest (Soft Color) + Navigate
                             Button(
-                                onClick = onShareClick,
+                                onClick = onArrivedClick,
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(44.dp),
@@ -486,45 +584,132 @@ fun SessionCard(
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = MaterialTheme.colorScheme.primaryContainer,
                                     contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
+                                ),
+                                contentPadding = PaddingValues(horizontal = 4.dp)
                             ) {
-                                Icon(Icons.Default.Share, null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
+                                Icon(Icons.Default.TaskAlt, null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    "Share", style = MaterialTheme.typography.labelMedium.copy(
+                                    "Reached Dest",
+                                    style = MaterialTheme.typography.labelMedium.copy(
                                         fontWeight = FontWeight.Bold
-                                    )
+                                    ),
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
+
                             }
-                            Spacer(modifier = Modifier.width(12.dp))
-                        }
-                        Button(
-                            onClick = { showLeaveWarning = true },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(44.dp),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.errorContainer,
-                                contentColor = MaterialTheme.colorScheme.onErrorContainer
-                            )
-                        ) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.ExitToApp, null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                "Leave", style = MaterialTheme.typography.labelMedium.copy(
-                                    fontWeight = FontWeight.Bold
-                                )
-                            )
+                            if (data.isUsersVisible) {
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Button(
+                                    onClick = {
+                                        if (hasDest) onNavigateClick() else Toast.makeText(
+                                            context, "Waiting for host to set destination",
+                                            Toast.LENGTH_SHORT
+                                        )
+                                            .show()
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(44.dp),
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary
+                                    )
+                                ) {
+                                    Icon(
+                                        Icons.Outlined.Navigation, null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        "Navigate",
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    )
+                                }
+                            }
+                        } else {
+                            // ⭐ Feature OFF: Share + Navigate
+                            if (canShare) {
+                                Button(
+                                    onClick = onShareClick,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(44.dp),
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                ) {
+                                    Icon(Icons.Default.Share, null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        "Share", style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    )
+                                }
+                            }
+                            if (canShare && data.isUsersVisible) {
+                                Spacer(modifier = Modifier.width(12.dp))
+                            }
+                            if (data.isUsersVisible) {
+                                Button(
+                                    onClick = {
+                                        if (hasDest) onNavigateClick() else Toast.makeText(
+                                            context, "Waiting for host to set destination",
+                                            Toast.LENGTH_SHORT
+                                        )
+                                            .show()
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(44.dp),
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary
+                                    )
+                                ) {
+                                    Icon(
+                                        Icons.Outlined.Navigation, null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        "Navigate",
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    )
+                                }
+                            }
                         }
                     }
                 }
 
                 // MENU
                 Spacer(modifier = Modifier.width(12.dp))
+
+                if (isAdmin) {
+                    FilledTonalIconButton(
+                        onClick = {
+                            if (hasDest) onNavigateClick() else Toast.makeText(
+                                context, "No destination set by you", Toast.LENGTH_SHORT
+                            )
+                                .show()
+                        },
+                        modifier = Modifier.size(44.dp), shape = RoundedCornerShape(16.dp),
+                        colors = IconButtonDefaults.filledTonalIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            contentColor = MaterialTheme.colorScheme.primary
+                        )
+                    ) { Icon(Icons.Outlined.Navigation, "Navigate") }
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
+
                 Box {
                     FilledTonalIconButton(
                         onClick = { isMenuExpanded = true },
@@ -535,7 +720,8 @@ fun SessionCard(
                         )
                     ) { Icon(Icons.Default.MoreVert, "More") }
 
-                    val itemsCount = if (isAdmin) 3 else (if (isPaused) 2 else 1) // Approx count
+                    val itemsCount =
+                        (if (isAdmin) 3 else 2) + (if (isArrivalEnabled && canShare) 1 else 0)
                     val menuHeight = (itemsCount * 48 + 16).dp
                     val anchorHeight = 50.dp
                     val totalOffset = menuHeight + anchorHeight
@@ -554,7 +740,8 @@ fun SessionCard(
                             DropdownMenuItem(
                                 text = {
                                     Text(
-                                        "Delete Session", color = MaterialTheme.colorScheme.error
+                                        "Delete Session",
+                                        color = MaterialTheme.colorScheme.error
                                     )
                                 },
                                 leadingIcon = {
@@ -565,6 +752,13 @@ fun SessionCard(
                                 },
                                 onClick = { isMenuExpanded = false; showStopWarning = true }
                             )
+                        }
+
+                        if (isArrivalEnabled && canShare) {
+                            DropdownMenuItem(
+                                text = { Text("Share Session") },
+                                leadingIcon = { Icon(Icons.Default.Share, null) },
+                                onClick = { isMenuExpanded = false; onShareClick() })
                         }
 
                         DropdownMenuItem(
@@ -581,8 +775,8 @@ fun SessionCard(
                             )
                         }
 
-                        // User Paused: Leave Option appears here
-                        if (!isAdmin && isPaused) {
+                        // User Option: Leave is now permanently here for non-hosts!
+                        if (!isAdmin) {
                             DropdownMenuItem(
                                 text = {
                                     Text(
@@ -595,11 +789,12 @@ fun SessionCard(
                                         tint = MaterialTheme.colorScheme.error
                                     )
                                 },
-                                onClick = { isMenuExpanded = false; onStopClick() }
+                                onClick = { isMenuExpanded = false; showLeaveWarning = true }
                             )
                         }
                     }
                 }
+
             }
         }
     }

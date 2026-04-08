@@ -272,9 +272,11 @@ private fun BottomNavigationBar(
                             text = item.label,
                             style = MaterialTheme.typography.labelSmall.copy(
                                 fontSize = with(LocalDensity.current) {
-                                    dimensionResource(id = R.dimen.text_nav_label).toSp()
+                                    dimensionResource(
+                                        id = if (isSelected) R.dimen.text_nav_label_15 else R.dimen.text_nav_label
+                                    ).toSp()
                                 },
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.ExtraLight
                             ),
                             color = if (isSelected) {
                                 MaterialTheme.colorScheme.onSurface
@@ -317,7 +319,6 @@ fun MultiLinkNavigationRail(
                         )
                     )
                     .padding(horizontal = 12.dp),
-                // ⭐ FIXED: Grouped items tightly together and centered them vertically
                 verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
                 horizontalAlignment = Alignment.Start
             ) {
@@ -341,7 +342,6 @@ fun MultiLinkNavigationRail(
                         }
                     }
 
-                    // ⭐ FIXED: Removed the sweeping fraction animation. Now it's a solid pill clip.
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -374,7 +374,12 @@ fun MultiLinkNavigationRail(
                             Text(
                                 text = item.label,
                                 style = MaterialTheme.typography.labelLarge.copy(
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                    fontSize = with(LocalDensity.current) {
+                                        dimensionResource(
+                                            id = if (isSelected) R.dimen.text_nav_label_15 else R.dimen.text_nav_label
+                                        ).toSp()
+                                    },
+                                    fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.ExtraLight
                                 ),
                                 color = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
                             )

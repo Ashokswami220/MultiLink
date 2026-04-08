@@ -3,6 +3,11 @@ package com.example.multilink.ui.tracker
 import android.content.Intent
 import android.os.Build
 import android.widget.Toast
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -31,6 +36,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.FilterList
@@ -41,13 +47,13 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.outlined.NearMe
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -59,6 +65,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -105,6 +114,14 @@ import com.example.multilink.ui.viewmodel.SessionViewModelFactory
 import com.example.multilink.utils.LocationUtils
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.material.icons.filled.TaskAlt
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import com.example.multilink.utils.HapticHelper
+import kotlinx.coroutines.delay
 
 enum class SeeAllSortType {
     A_Z, Z_A, JOINED_FIRST, JOINED_LATE
@@ -163,6 +180,9 @@ fun SeeAllScreen(
     val (showPauseDialog, setShowPauseDialog) = remember { mutableStateOf(false) }
     val (showInfoDialog, setShowInfoDialog) = remember { mutableStateOf(false) }
 
+    var isSearchExpanded by rememberSaveable { mutableStateOf(false) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+
     var currentSessionStatus by remember { mutableStateOf("Live") }
     LaunchedEffect(sessionId) {
         repository.getSessionDetails(sessionId)
@@ -174,20 +194,30 @@ fun SeeAllScreen(
     var currentUserFilter by remember { mutableStateOf("All") }
     var currentSortType by remember { mutableStateOf(SeeAllSortType.JOINED_FIRST) }
 
-    val sortedParticipants = remember(uiState.participants, currentSortType, currentUserFilter) {
-        val filteredList = when (currentUserFilter) {
-            "Active" -> uiState.participants.filter { it.status != "Paused" }
-            "Paused" -> uiState.participants.filter { it.status == "Paused" }
-            else -> uiState.participants
-        }
+    val sortedParticipants =
+        remember(uiState.participants, currentSortType, currentUserFilter, searchQuery) {
+            // 1. First, apply search query filter
+            val searchFiltered = if (searchQuery.isNotBlank()) {
+                uiState.participants.filter { it.name.contains(searchQuery, ignoreCase = true) }
+            } else {
+                uiState.participants
+            }
 
-        when (currentSortType) {
-            SeeAllSortType.A_Z -> filteredList.sortedBy { it.name.lowercase() }
-            SeeAllSortType.Z_A -> filteredList.sortedByDescending { it.name.lowercase() }
-            SeeAllSortType.JOINED_FIRST -> filteredList
-            SeeAllSortType.JOINED_LATE -> filteredList.reversed()
+            // 2. Then apply the category filter to the searched list
+            val filteredList = when (currentUserFilter) {
+                "Active" -> searchFiltered.filter { it.status != "Paused" }
+                "Paused" -> searchFiltered.filter { it.status == "Paused" }
+                else -> searchFiltered
+            }
+
+            // 3. Finally apply sorting
+            when (currentSortType) {
+                SeeAllSortType.A_Z -> filteredList.sortedBy { it.name.lowercase() }
+                SeeAllSortType.Z_A -> filteredList.sortedByDescending { it.name.lowercase() }
+                SeeAllSortType.JOINED_FIRST -> filteredList
+                SeeAllSortType.JOINED_LATE -> filteredList.reversed()
+            }
         }
-    }
 
     fun debounceClick(action: () -> Unit) {
         val now = System.currentTimeMillis()
@@ -200,6 +230,9 @@ fun SeeAllScreen(
     // --- NAVIGATION LOGIC ---
     var isNavigatingOut by remember { mutableStateOf(false) }
 
+    val msgSessionEnded = stringResource(R.string.msg_session_ended_host)
+    val msgRemoved = stringResource(R.string.msg_removed_from_session)
+
     LaunchedEffect(
         uiState.isSessionActive, uiState.isRemoved, uiState.isLoading, uiState.sessionData?.status
     ) {
@@ -211,20 +244,19 @@ fun SeeAllScreen(
         if (!uiState.isSessionActive) {
             isNavigatingOut = true
             Toast.makeText(
-                context, context.getString(R.string.msg_session_ended_host), Toast.LENGTH_LONG
+                context, msgSessionEnded, Toast.LENGTH_LONG
             )
                 .show()
             onSessionEnded()
         } else if (uiState.isRemoved) {
-            kotlinx.coroutines.delay(100)
+            delay(100)
             isNavigatingOut = true
             Toast.makeText(
-                context, context.getString(R.string.msg_removed_from_session), Toast.LENGTH_LONG
+                context, msgRemoved, Toast.LENGTH_LONG
             )
                 .show()
             onSessionEnded()
         } else if (isPaused && !isAdmin) {
-            // ⭐ FIXED: Kick non-admins, but keep service alive
             isNavigatingOut = true
             Toast.makeText(context, "Session paused by Host", Toast.LENGTH_LONG)
                 .show()
@@ -249,6 +281,10 @@ fun SeeAllScreen(
             onConfirm = {
                 setShowPauseDialog(false)
                 scope.launch { repository.updateSessionStatus(sessionId, !isPaused) }
+
+                val message = if (!isPaused) "Session is paused" else "Session is resumed"
+                Toast.makeText(context, message, Toast.LENGTH_SHORT)
+                    .show()
             },
             onDismiss = { setShowPauseDialog(false) }
         )
@@ -263,21 +299,95 @@ fun SeeAllScreen(
 
     Scaffold(
         topBar = {
+            // ⭐ ADDED: Focus Requester and Keyboard Controller for auto-opening keyboard
+            val focusRequester = remember { FocusRequester() }
+            val keyboardController = LocalSoftwareKeyboardController.current
+
             Column {
-                CenterAlignedTopAppBar(
+                TopAppBar(
                     title = {
-                        Text(
-                            text = uiState.sessionTitle,
-                            style = MaterialTheme.typography.titleLarge.copy(
-                                fontWeight = FontWeight.Bold
-                            ),
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        AnimatedContent(
+                            targetState = isSearchExpanded,
+                            transitionSpec = {
+                                (expandHorizontally(expandFrom = Alignment.End) + fadeIn(
+                                    tween(300)
+                                )) togetherWith
+                                        (shrinkHorizontally(
+                                            shrinkTowards = Alignment.End
+                                        ) + fadeOut(tween(300)))
+                            },
+                            label = "SearchBarAnimation"
+                        ) { expanded ->
+                            if (expanded) {
+                                LaunchedEffect(Unit) {
+                                    focusRequester.requestFocus()
+                                    keyboardController?.show()
+                                }
+
+                                TextField(
+                                    value = searchQuery,
+                                    onValueChange = { searchQuery = it },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .focusRequester(focusRequester),
+                                    placeholder = {
+                                        Text(
+                                            "Search users...",
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    },
+                                    singleLine = true,
+                                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    ),
+                                    trailingIcon = {
+                                        if (searchQuery.isNotEmpty()) {
+                                            IconButton(onClick = {
+                                                HapticHelper.trigger(
+                                                    context, HapticHelper.Type.LIGHT
+                                                )
+                                                searchQuery = ""
+                                            }) {
+                                                Icon(
+                                                    Icons.Default.Close,
+                                                    contentDescription = "Clear Search",
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+                                    },
+                                    colors = TextFieldDefaults.colors(
+                                        focusedContainerColor = Color.Transparent,
+                                        unfocusedContainerColor = Color.Transparent,
+                                        disabledContainerColor = Color.Transparent,
+                                        focusedIndicatorColor = Color.Transparent,
+                                        unfocusedIndicatorColor = Color.Transparent
+                                    )
+                                )
+                            } else {
+                                Text(
+                                    text = uiState.sessionTitle,
+                                    style = MaterialTheme.typography.titleLarge.copy(
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
                     },
                     navigationIcon = {
-                        IconButton(onClick = onBackClick) {
+                        IconButton(onClick = {
+                            HapticHelper.trigger(context, HapticHelper.Type.LIGHT)
+                            if (isSearchExpanded) {
+                                isSearchExpanded = false
+                                searchQuery = ""
+                                keyboardController?.hide()
+                            } else {
+                                onBackClick()
+                            }
+                        }) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBackIos,
                                 contentDescription = stringResource(R.string.cd_back_button),
@@ -286,161 +396,215 @@ fun SeeAllScreen(
                         }
                     },
                     actions = {
-                        Box {
-                            IconButton(
-                                onClick = { setShowFilterOptions(true); setShowMenu(false) }) {
+                        if (!isSearchExpanded) {
+                            //  Search Button
+                            IconButton(onClick = {
+                                HapticHelper.trigger(context, HapticHelper.Type.LIGHT)
+                                isSearchExpanded = true
+                            }) {
                                 Icon(
-                                    Icons.Default.FilterList, "Filter",
+                                    Icons.Default.Search, "Search",
                                     tint = MaterialTheme.colorScheme.onSurface
                                 )
                             }
 
-                            DropdownMenu(
-                                expanded = showFilterOptions,
-                                onDismissRequest = { setShowFilterOptions(false) },
-                                shape = RoundedCornerShape(
-                                    dimensionResource(id = R.dimen.corner_menu_sheet)
-                                ),
-                                offset = DpOffset(x = 0.dp, y = 0.dp)
-                            ) {
-                                MenuRadioItem(
-                                    "Show All Users", currentUserFilter == "All"
-                                ) { currentUserFilter = "All"; setShowFilterOptions(false) }
-                                MenuRadioItem(
-                                    "Show Active", currentUserFilter == "Active"
-                                ) { currentUserFilter = "Active"; setShowFilterOptions(false) }
-                                MenuRadioItem(
-                                    "Show Paused", currentUserFilter == "Paused"
-                                ) { currentUserFilter = "Paused"; setShowFilterOptions(false) }
-                            }
-                        }
-
-                        // Existing More Options Button
-                        Box {
-                            IconButton(
-                                onClick = {
-                                    setShowMenu(true); setShowSortOptions(
-                                    false
-                                ); setShowFilterOptions(false)
-                                }) {
-                                Icon(
-                                    Icons.Default.MoreVert, stringResource(R.string.cd_menu),
-                                    tint = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-
-                            DropdownMenu(
-                                expanded = showMenu,
-                                onDismissRequest = { setShowMenu(false) },
-                                shape = RoundedCornerShape(
-                                    dimensionResource(id = R.dimen.corner_menu_sheet)
-                                ),
-                                offset = DpOffset(
-                                    x = -dimensionResource(R.dimen.padding_medium), y = 0.dp
-                                )
-                            ) {
-                                if (showSortOptions) {
-                                    // Sub-Menu: Sort
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(
-                                                stringResource(R.string.cd_back_button),
-                                                color = MaterialTheme.colorScheme.secondary
-                                            )
-                                        },
-                                        leadingIcon = {
-                                            Icon(
-                                                Icons.AutoMirrored.Filled.KeyboardArrowLeft, null,
-                                                tint = MaterialTheme.colorScheme.secondary
-                                            )
-                                        },
-                                        onClick = { setShowSortOptions(false) }
-                                    )
-                                    HorizontalDivider()
-
-                                    MenuRadioItem(
-                                        stringResource(R.string.sort_az),
-                                        currentSortType == SeeAllSortType.A_Z
-                                    ) { currentSortType = SeeAllSortType.A_Z; setShowMenu(false) }
-                                    MenuRadioItem(
-                                        stringResource(R.string.sort_za),
-                                        currentSortType == SeeAllSortType.Z_A
-                                    ) { currentSortType = SeeAllSortType.Z_A; setShowMenu(false) }
-                                    MenuRadioItem(
-                                        stringResource(R.string.sort_joined_first),
-                                        currentSortType == SeeAllSortType.JOINED_FIRST
-                                    ) {
-                                        currentSortType = SeeAllSortType.JOINED_FIRST; setShowMenu(
-                                        false
-                                    )
+                            // Existing More Options Menu Button
+                            Box {
+                                IconButton(
+                                    onClick = {
+                                        HapticHelper.trigger(context, HapticHelper.Type.LIGHT)
+                                        setShowMenu(true)
+                                        setShowSortOptions(false)
+                                        setShowFilterOptions(false)
                                     }
-                                    MenuRadioItem(
-                                        stringResource(R.string.sort_joined_late),
-                                        currentSortType == SeeAllSortType.JOINED_LATE
-                                    ) {
-                                        currentSortType = SeeAllSortType.JOINED_LATE; setShowMenu(
-                                        false
+                                ) {
+                                    Icon(
+                                        Icons.Default.MoreVert, stringResource(R.string.cd_menu),
+                                        tint = MaterialTheme.colorScheme.onSurface
                                     )
-                                    }
+                                }
 
-                                } else {
-                                    // Main Menu
-                                    MenuActionItem(
-                                        text = stringResource(R.string.menu_session_info),
-                                        icon = Icons.Default.Info,
-                                        onClick = { setShowMenu(false); setShowInfoDialog(true) }
+                                DropdownMenu(
+                                    expanded = showMenu,
+                                    onDismissRequest = { setShowMenu(false) },
+                                    shape = RoundedCornerShape(
+                                        dimensionResource(id = R.dimen.corner_menu_sheet)
+                                    ),
+                                    offset = DpOffset(
+                                        x = -dimensionResource(R.dimen.padding_medium), y = 0.dp
                                     )
-
-                                    DropdownMenuItem(
-                                        text = { Text(stringResource(R.string.menu_sort_by)) },
-                                        trailingIcon = {
-                                            Icon(
-                                                Icons.AutoMirrored.Filled.KeyboardArrowRight, null
-                                            )
-                                        },
-                                        leadingIcon = {
-                                            Icon(
-                                                Icons.AutoMirrored.Filled.Sort, null, Modifier.size(
-                                                    dimensionResource(
-                                                        R.dimen.icon_small
-                                                    )
+                                ) {
+                                    if (showSortOptions) {
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    stringResource(R.string.cd_back_button),
+                                                    color = MaterialTheme.colorScheme.secondary
                                                 )
-                                            )
-                                        },
-                                        contentPadding = PaddingValues(
-                                            horizontal = dimensionResource(R.dimen.padding_medium),
-                                            vertical = 0.dp
-                                        ),
-                                        onClick = { setShowSortOptions(true) }
-                                    )
-
-                                    if (uiState.isCurrentUserAdmin) {
+                                            },
+                                            leadingIcon = {
+                                                Icon(
+                                                    Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                                                    null,
+                                                    tint = MaterialTheme.colorScheme.secondary
+                                                )
+                                            },
+                                            onClick = { setShowSortOptions(false) }
+                                        )
                                         HorizontalDivider()
 
-                                        val isPaused = currentSessionStatus == "Paused"
+                                        MenuRadioItem(
+                                            stringResource(R.string.sort_az),
+                                            currentSortType == SeeAllSortType.A_Z
+                                        ) {
+                                            currentSortType = SeeAllSortType.A_Z; setShowMenu(
+                                            false
+                                        )
+                                        }
+                                        MenuRadioItem(
+                                            stringResource(R.string.sort_za),
+                                            currentSortType == SeeAllSortType.Z_A
+                                        ) {
+                                            currentSortType = SeeAllSortType.Z_A; setShowMenu(
+                                            false
+                                        )
+                                        }
+                                        MenuRadioItem(
+                                            stringResource(R.string.sort_joined_first),
+                                            currentSortType == SeeAllSortType.JOINED_FIRST
+                                        ) {
+                                            currentSortType =
+                                                SeeAllSortType.JOINED_FIRST; setShowMenu(false)
+                                        }
+                                        MenuRadioItem(
+                                            stringResource(R.string.sort_joined_late),
+                                            currentSortType == SeeAllSortType.JOINED_LATE
+                                        ) {
+                                            currentSortType =
+                                                SeeAllSortType.JOINED_LATE; setShowMenu(false)
+                                        }
+
+                                    } else if (showFilterOptions) {
+                                        //Sub-Menu for Filter
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    "Back",
+                                                    color = MaterialTheme.colorScheme.secondary
+                                                )
+                                            },
+                                            leadingIcon = {
+                                                Icon(
+                                                    Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                                                    null,
+                                                    tint = MaterialTheme.colorScheme.secondary
+                                                )
+                                            },
+                                            onClick = { setShowFilterOptions(false) }
+                                        )
+                                        HorizontalDivider()
+
+                                        MenuRadioItem(
+                                            "Show All Users", currentUserFilter == "All"
+                                        ) { currentUserFilter = "All"; setShowMenu(false) }
+                                        MenuRadioItem(
+                                            "Show Active", currentUserFilter == "Active"
+                                        ) { currentUserFilter = "Active"; setShowMenu(false) }
+                                        MenuRadioItem(
+                                            "Show Paused", currentUserFilter == "Paused"
+                                        ) { currentUserFilter = "Paused"; setShowMenu(false) }
+
+                                    } else {
+                                        // Main Menu
                                         MenuActionItem(
-                                            text = if (isPaused) stringResource(
-                                                R.string.menu_resume_session
-                                            ) else stringResource(R.string.menu_pause_session),
-                                            icon = if (isPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                                            text = stringResource(R.string.menu_session_info),
+                                            icon = Icons.Default.Info,
                                             onClick = {
-                                                setShowMenu(false); setShowPauseDialog(
+                                                setShowMenu(false); setShowInfoDialog(
                                                 true
                                             )
                                             }
                                         )
 
-                                        MenuActionItem(
-                                            text = stringResource(R.string.menu_delete_session),
-                                            icon = Icons.Default.Delete,
-                                            iconColor = MaterialTheme.colorScheme.error,
-                                            textColor = MaterialTheme.colorScheme.error,
-                                            onClick = {
-                                                setShowMenu(false); setShowDeleteDialog(
-                                                true
-                                            )
-                                            }
+                                        // Filter By Dropdown Item
+                                        DropdownMenuItem(
+                                            text = { Text("Filter By") },
+                                            trailingIcon = {
+                                                Icon(
+                                                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                                    null
+                                                )
+                                            },
+                                            leadingIcon = {
+                                                Icon(
+                                                    Icons.Default.FilterList, null,
+                                                    Modifier.size(
+                                                        dimensionResource(R.dimen.icon_small)
+                                                    )
+                                                )
+                                            },
+                                            contentPadding = PaddingValues(
+                                                horizontal = dimensionResource(
+                                                    R.dimen.padding_medium
+                                                ),
+                                                vertical = 0.dp
+                                            ),
+                                            onClick = { setShowFilterOptions(true) }
                                         )
+
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.menu_sort_by)) },
+                                            trailingIcon = {
+                                                Icon(
+                                                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                                    null
+                                                )
+                                            },
+                                            leadingIcon = {
+                                                Icon(
+                                                    Icons.AutoMirrored.Filled.Sort, null,
+                                                    Modifier.size(
+                                                        dimensionResource(R.dimen.icon_small)
+                                                    )
+                                                )
+                                            },
+                                            contentPadding = PaddingValues(
+                                                horizontal = dimensionResource(
+                                                    R.dimen.padding_medium
+                                                ),
+                                                vertical = 0.dp
+                                            ),
+                                            onClick = { setShowSortOptions(true) }
+                                        )
+
+                                        if (uiState.isCurrentUserAdmin) {
+                                            HorizontalDivider()
+
+                                            val isPaused = currentSessionStatus == "Paused"
+                                            MenuActionItem(
+                                                text = if (isPaused) stringResource(
+                                                    R.string.menu_resume_session
+                                                ) else stringResource(R.string.menu_pause_session),
+                                                icon = if (isPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                                                onClick = {
+                                                    setShowMenu(false); setShowPauseDialog(
+                                                    true
+                                                )
+                                                }
+                                            )
+
+                                            MenuActionItem(
+                                                text = stringResource(R.string.menu_delete_session),
+                                                icon = Icons.Default.Delete,
+                                                iconColor = MaterialTheme.colorScheme.error,
+                                                textColor = MaterialTheme.colorScheme.error,
+                                                onClick = {
+                                                    setShowMenu(false); setShowDeleteDialog(
+                                                    true
+                                                )
+                                                }
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -515,6 +679,14 @@ fun SeeAllScreen(
                         isViewerAdmin = uiState.isCurrentUserAdmin,
                         destLat = uiState.endLat,
                         destLng = uiState.endLng,
+                        isArrivalTrackingEnabled = uiState.sessionData?.isArrivalTrackingEnabled == true,
+                        onMarkArrivedClick = {
+                            scope.launch {
+                                repository.markUserAsArrived(
+                                    sessionId, user.id
+                                )
+                            }
+                        },
                         onClick = { debounceClick { onUserClick(user.id) } },
                         onCallClick = { actionHandler.onCall(userPhone) },
                         onRemoveClick = {
@@ -649,6 +821,8 @@ fun UserGridCard(
     isViewerAdmin: Boolean,
     destLat: Double,
     destLng: Double,
+    isArrivalTrackingEnabled: Boolean,
+    onMarkArrivedClick: () -> Unit,
     onClick: () -> Unit,
     onCallClick: () -> Unit,
     onRemoveClick: () -> Unit,
@@ -661,6 +835,7 @@ fun UserGridCard(
     }
 
     val isUserPaused = user.status == "Paused"
+    val hasArrived = user.hasArrived
 
     Card(
         onClick = onClick,
@@ -718,16 +893,14 @@ fun UserGridCard(
                             .align(Alignment.BottomEnd)
                             .clip(CircleShape)
                             .background(
-                                if (isUserPaused) Color(
-                                    0xFFFF9800
-                                ) else if (user.status == "Online") Color(
-                                    0xFF4CAF50
-                                ) else Color.Gray
+                                if (hasArrived) Color(0xFF4CAF50)
+                                else if (isUserPaused) Color(0xFFFF9800)
+                                else if (user.status == "Online") Color(0xFF4CAF50)
+                                else Color.Gray
                             )
                             .border(
                                 dimensionResource(R.dimen.stroke_width_standard),
-                                MaterialTheme.colorScheme.surfaceContainerLow,
-                                CircleShape
+                                MaterialTheme.colorScheme.surfaceContainerLow, CircleShape
                             )
                     )
                 }
@@ -803,7 +976,30 @@ fun UserGridCard(
                             )
                         )
 
-                        if (isViewerAdmin && !isCardUserAdmin) {
+                        if (isViewerAdmin && isArrivalTrackingEnabled && !hasArrived) {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        "Mark as Arrived", fontSize = 14.sp,
+                                        color = Color(0xFF4CAF50)
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Default.TaskAlt, null, Modifier.size(
+                                            dimensionResource(R.dimen.icon_small)
+                                        ), tint = Color(0xFF4CAF50)
+                                    )
+                                },
+                                onClick = { expanded = false; onMarkArrivedClick() },
+                                contentPadding = PaddingValues(
+                                    horizontal = dimensionResource(R.dimen.padding_medium),
+                                    vertical = 0.dp
+                                )
+                            )
+                        }
+
+                        if (isViewerAdmin && !isCardUserAdmin && !hasArrived) {
                             DropdownMenuItem(
                                 text = {
                                     Text(
@@ -895,22 +1091,34 @@ fun UserGridCard(
                 )
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Outlined.NearMe, null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(dimensionResource(R.dimen.icon_stat))
-                    )
-                    Spacer(modifier = Modifier.width(dimensionResource(R.dimen.padding_mini)))
-
-                    Text(
-                        text = if (distanceString == "...") stringResource(
-                            R.string.state_calculating
-                        ) else stringResource(R.string.format_distance_to_dest, distanceString),
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontWeight = FontWeight.SemiBold
-                        ),
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                    // Display "Arrived" vs "Distance"
+                    if (hasArrived) {
+                        Icon(
+                            Icons.Default.TaskAlt, null, tint = Color(0xFF4CAF50),
+                            modifier = Modifier.size(dimensionResource(R.dimen.icon_stat))
+                        )
+                        Spacer(modifier = Modifier.width(dimensionResource(R.dimen.padding_mini)))
+                        Text(
+                            "Arrived at Destination",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Bold
+                            ), color = Color(0xFF4CAF50)
+                        )
+                    } else {
+                        Icon(
+                            Icons.Outlined.NearMe, null, tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(dimensionResource(R.dimen.icon_stat))
+                        )
+                        Spacer(modifier = Modifier.width(dimensionResource(R.dimen.padding_mini)))
+                        Text(
+                            text = if (distanceString == "...") stringResource(
+                                R.string.state_calculating
+                            ) else stringResource(R.string.format_distance_to_dest, distanceString),
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.SemiBold
+                            ), color = MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
             }
         }

@@ -3,6 +3,7 @@ package com.example.multilink.ui.tracker
 import android.Manifest
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.location.Location
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -45,11 +46,15 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.TaskAlt
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -57,6 +62,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -133,8 +139,38 @@ fun LiveTrackingScreen(
     val context = LocalContext.current
     val auth = remember { FirebaseAuth.getInstance() }
     val currentUserId = remember { auth.currentUser?.uid ?: "" }
+
     val repository = remember { RealtimeRepository() }
     val scope = rememberCoroutineScope()
+
+    // DIRECT DATABASE FETCH: Bypasses the ViewModel to guarantee accuracy
+    var isArrivalEnabled by remember { mutableStateOf(false) }
+    var hasArrived by remember { mutableStateOf(false) }
+
+    LaunchedEffect(sessionId) {
+        repository.getSessionDetails(sessionId)
+            .collect { data ->
+                isArrivalEnabled = data["isArrivalTrackingEnabled"] as? Boolean ?: false
+            }
+    }
+
+    LaunchedEffect(sessionId, currentUserId) {
+        if (currentUserId.isNotEmpty()) {
+            val userRef = com.google.firebase.database.FirebaseDatabase.getInstance().reference
+                .child("sessions")
+                .child(sessionId)
+                .child("users")
+                .child(currentUserId)
+                .child("hasArrived")
+            userRef.addValueEventListener(object : com.google.firebase.database.ValueEventListener {
+                override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
+                    hasArrived = snapshot.getValue(Boolean::class.java) ?: false
+                }
+
+                override fun onCancelled(error: com.google.firebase.database.DatabaseError) {}
+            })
+        }
+    }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, sessionId) {
@@ -175,6 +211,9 @@ fun LiveTrackingScreen(
     val (showDeleteDialog, setShowDeleteDialog) = remember { mutableStateOf(false) }
     val (showPauseDialog, setShowPauseDialog) = remember { mutableStateOf(false) }
     val (showInfoDialog, setShowInfoDialog) = remember { mutableStateOf(false) }
+
+    var showTooFarDialog by remember { mutableStateOf(false) }
+    var showArrivedConfirmDialog by remember { mutableStateOf(false) }
 
     // --- NAVIGATION GUARDS ---
     var isNavigatingOut by remember { mutableStateOf(false) }
@@ -234,6 +273,29 @@ fun LiveTrackingScreen(
         )
     }
 
+    // Distance Math for 200m Verification
+    val distToDestMeters = remember(myRealPoint, uiState.endPoint) {
+        if (myRealPoint != null && uiState.endPoint != null) {
+            val results = FloatArray(1)
+            Location.distanceBetween(
+                myRealPoint.latitude(), myRealPoint.longitude(), uiState.endPoint!!.latitude(),
+                uiState.endPoint!!.longitude(), results
+            )
+            results[0]
+        } else Float.MAX_VALUE
+    }
+
+    val handleArrivedClick = {
+        if (uiState.endPoint == null) {
+            Toast.makeText(context, "Destination not set by host.", Toast.LENGTH_SHORT)
+                .show()
+        } else if (distToDestMeters > 200f) {
+            showTooFarDialog = true
+        } else {
+            showArrivedConfirmDialog = true
+        }
+    }
+
     val mapViewportState = rememberMapViewportState {
         setCameraOptions {
             center(myRealPoint); zoom(13.5); pitch(
@@ -288,6 +350,10 @@ fun LiveTrackingScreen(
             onConfirm = {
                 setShowPauseDialog(false)
                 scope.launch { repository.updateSessionStatus(sessionId, !isPaused) }
+
+                val message = if (!isPaused) "Session is paused" else "Session is resumed"
+                Toast.makeText(context, message, Toast.LENGTH_SHORT)
+                    .show()
             },
             onDismiss = { setShowPauseDialog(false) }
         )
@@ -297,6 +363,50 @@ fun LiveTrackingScreen(
         SessionInfoDialog(
             session = uiState.sessionData!!,
             onDismiss = { setShowInfoDialog(false) }
+        )
+    }
+
+    if (showTooFarDialog) {
+        AlertDialog(
+            onDismissRequest = { showTooFarDialog = false },
+            title = { Text("Too Far Away") },
+            text = {
+                Text(
+                    "You must be within 200 meters of the destination to check in. You are currently ${distToDestMeters.toInt()} meters away."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showTooFarDialog = false }) {
+                    Text(
+                        "Got it"
+                    )
+                }
+            }
+        )
+    }
+
+    if (showArrivedConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showArrivedConfirmDialog = false },
+            title = { Text("Mark as Arrived?") },
+            text = {
+                Text(
+                    "This will automatically pause your location tracking and notify everyone that you have reached the destination."
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    showArrivedConfirmDialog = false
+                    scope.launch { repository.markUserAsArrived(sessionId, currentUserId) }
+                }) { Text("Confirm") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showArrivedConfirmDialog = false }) {
+                    Text(
+                        "Cancel"
+                    )
+                }
+            }
         )
     }
 
@@ -380,6 +490,17 @@ fun LiveTrackingScreen(
                     ),
                 horizontalAlignment = Alignment.End
             ) {
+
+                if (isArrivalEnabled && !hasArrived) {
+                    FloatingActionButton(
+                        onClick = handleArrivedClick,
+                        containerColor = Color(0xFF4CAF50),
+                        contentColor = Color.White,
+                        shape = CircleShape
+                    ) { Icon(Icons.Default.TaskAlt, "Check In") }
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End,

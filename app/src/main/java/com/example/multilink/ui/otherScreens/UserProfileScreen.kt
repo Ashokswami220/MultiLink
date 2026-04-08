@@ -1,4 +1,4 @@
-package com.example.multilink.ui.main
+package com.example.multilink.ui.otherScreens
 
 import android.content.Context
 import android.content.Intent
@@ -82,7 +82,9 @@ fun UserProfileScreen(
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBackIos,
                         contentDescription = "Back",
-                        modifier = Modifier.size(18.dp).offset(x = 2.dp)
+                        modifier = Modifier
+                            .size(18.dp)
+                            .offset(x = 2.dp)
                     )
                 }
             }
@@ -141,10 +143,16 @@ fun UserProfileScreen(
                         shape = CircleShape,
                         color = MaterialTheme.colorScheme.primary,
                         border = BorderStroke(2.dp, MaterialTheme.colorScheme.surface),
-                        modifier = Modifier.size(28.dp).clickable { onEditImage() }
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clickable { onEditImage() }
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.CameraAlt, "Edit", tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(14.dp))
+                            Icon(
+                                Icons.Default.CameraAlt, "Edit",
+                                tint = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.size(14.dp)
+                            )
                         }
                     }
                 }
@@ -154,7 +162,9 @@ fun UserProfileScreen(
                 Column {
                     Text(
                         text = name,
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold
+                        ),
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
@@ -170,8 +180,12 @@ fun UserProfileScreen(
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
                         modifier = Modifier.height(32.dp),
                         shape = RoundedCornerShape(8.dp),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                        border = BorderStroke(
+                            1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)
+                        ),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error
+                        )
                     ) {
                         Text("Log Out", style = MaterialTheme.typography.labelMedium)
                     }
@@ -181,16 +195,25 @@ fun UserProfileScreen(
             Spacer(modifier = Modifier.height(32.dp))
 
             // --- PERSONAL DETAILS ---
-            Text("Personal Details", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), modifier = Modifier.padding(bottom = 12.dp))
+            Text(
+                "Personal Details",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
 
             Card(
                 shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                ),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(vertical = 8.dp)) {
                     ProfileOptionItem(Icons.Default.Person, "Name", name, onEditName)
-                    HorizontalDivider(color = MaterialTheme.colorScheme.surface, thickness = 1.dp, modifier = Modifier.padding(horizontal = 16.dp))
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.surface, thickness = 1.dp,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
                     ProfileOptionItem(Icons.Default.Phone, "Phone", phone, onEditPhone)
                 }
             }
@@ -198,18 +221,34 @@ fun UserProfileScreen(
             Spacer(modifier = Modifier.height(24.dp))
 
             // --- GENERAL ---
-            Text("General", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), modifier = Modifier.padding(bottom = 12.dp))
+            Text(
+                "General",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
 
             Card(
                 shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                ),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(vertical = 8.dp)) {
                     MenuActionItem(Icons.Default.Share, "Share App") { shareAppText(context) }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.surface, thickness = 1.dp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.surface, thickness = 1.dp,
+                        modifier = Modifier.padding(
+                            horizontal = 16.dp, vertical = 4.dp
+                        )
+                    )
                     MenuActionItem(Icons.Default.Feedback, "Feedback") {}
-                    HorizontalDivider(color = MaterialTheme.colorScheme.surface, thickness = 1.dp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.surface, thickness = 1.dp,
+                        modifier = Modifier.padding(
+                            horizontal = 16.dp, vertical = 4.dp
+                        )
+                    )
                     MenuActionItem(Icons.Default.Info, "About Us") {}
                 }
             }
@@ -300,7 +339,8 @@ fun MenuActionItem(
 }
 
 fun shareAppText(context: Context) {
-    val appLink = "https://play.google.com/store/apps/details?id=com.example.multilink" // Placeholder
+    val appLink =
+        "https://play.google.com/store/apps/details?id=com.example.multilink" // Placeholder
     val shareContent = """
         Track friends and family in real-time with MultiLink!
         

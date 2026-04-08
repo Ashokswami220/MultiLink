@@ -1,5 +1,6 @@
 package com.example.multilink.ui.components.dialogs
 
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.keyframes
@@ -27,6 +28,7 @@ import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.TaskAlt
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.LocationOn
@@ -40,10 +42,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -53,6 +53,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.multilink.model.SessionData
 import com.example.multilink.ui.components.location.LocationPicker
+import com.example.multilink.utils.HapticHelper
 import com.mapbox.geojson.Point
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
@@ -68,7 +69,6 @@ fun CreateSessionDialog(
     existingSession: SessionData? = null
 ) {
     val scope = rememberCoroutineScope()
-    val haptic = LocalHapticFeedback.current
     val shakeOffset = remember { Animatable(0f) }
     val isDark = isSystemInDarkTheme()
     val pagerState = rememberPagerState(pageCount = { 2 })
@@ -92,6 +92,8 @@ fun CreateSessionDialog(
     var isSharingMyLocation by rememberSaveable { mutableStateOf(true) }
     var isUsersVisible by rememberSaveable { mutableStateOf(true) }
     var isSharingAllowed by rememberSaveable { mutableStateOf(true) }
+    var isArrivalTrackingEnabled by rememberSaveable { mutableStateOf(false) }
+
 
     var fromPoint by remember(existingSession) {
         mutableStateOf(
@@ -120,6 +122,7 @@ fun CreateSessionDialog(
             isUsersVisible = existingSession.isUsersVisible
             isSharingAllowed = existingSession.isSharingAllowed
             isSharingMyLocation = existingSession.isHostSharing
+            isArrivalTrackingEnabled = existingSession.isArrivalTrackingEnabled
             if ((existingSession.startLat ?: 0.0) != 0.0) {
                 fromPoint = Point.fromLngLat(existingSession.startLng!!, existingSession.startLat!!)
             }
@@ -136,6 +139,7 @@ fun CreateSessionDialog(
             isUsersVisible = true
             isSharingAllowed = true
             isSharingMyLocation = true
+            isArrivalTrackingEnabled = false
             fromPoint = null
             toPoint = null
         }
@@ -147,7 +151,7 @@ fun CreateSessionDialog(
 
     fun triggerShake() {
         scope.launch {
-            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            HapticHelper.trigger(context, HapticHelper.Type.ERROR)
             shakeOffset.animateTo(
                 targetValue = 0f,
                 animationSpec = keyframes {
@@ -202,7 +206,7 @@ fun CreateSessionDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = if (existingSession != null) "Edit Session" else if (pagerState.currentPage == 0) "New Session" else "Permissions",
+                            text = if (existingSession != null) "Edit Session" else if (pagerState.currentPage == 0) "New Session" else "Advanced Settings",
                             style = MaterialTheme.typography.headlineSmall.copy(
                                 fontWeight = FontWeight.Bold
                             ),
@@ -292,6 +296,7 @@ fun CreateSessionDialog(
                                         {
                                             toLoc = ""
                                             toPoint = null
+                                            isArrivalTrackingEnabled = false
                                         }
                                     } else null
                                 ) {
@@ -314,9 +319,10 @@ fun CreateSessionDialog(
                                                         if (isHours) MaterialTheme.colorScheme.primary else Color.Transparent
                                                     )
                                                     .clickable {
-                                                        haptic.performHapticFeedback(
-                                                            HapticFeedbackType.LongPress
-                                                        ); isHours = true; durationVal = "2"
+                                                        HapticHelper.trigger(
+                                                            context, HapticHelper.Type.MEDIUM
+                                                        )
+                                                        isHours = true; durationVal = "2"
                                                     }
                                                     .padding(horizontal = 24.dp, vertical = 10.dp)
                                             ) {
@@ -333,9 +339,10 @@ fun CreateSessionDialog(
                                                         if (!isHours) MaterialTheme.colorScheme.primary else Color.Transparent
                                                     )
                                                     .clickable {
-                                                        haptic.performHapticFeedback(
-                                                            HapticFeedbackType.LongPress
-                                                        ); isHours = false; durationVal = "1"
+                                                        HapticHelper.trigger(
+                                                            context, HapticHelper.Type.MEDIUM
+                                                        )
+                                                        isHours = false; durationVal = "1"
                                                     }
                                                     .padding(horizontal = 24.dp, vertical = 10.dp)
                                             ) {
@@ -364,7 +371,9 @@ fun CreateSessionDialog(
                                                     expanded = isDurationExpanded
                                                 )
                                             },
-                                            modifier = Modifier.menuAnchor(),
+                                            modifier = Modifier.menuAnchor(
+                                                ExposedDropdownMenuAnchorType.PrimaryNotEditable
+                                            ),
                                             shape = RoundedCornerShape(12.dp),
                                             colors = OutlinedTextFieldDefaults.colors(
                                                 unfocusedBorderColor = MaterialTheme.colorScheme.outline,
@@ -441,7 +450,7 @@ fun CreateSessionDialog(
                                 }
                             } else {
                                 // === STEP 2 ===
-                                Spacer(modifier = Modifier.height(32.dp))
+                                Spacer(modifier = Modifier.height(8.dp))
                                 SettingToggleCard(
                                     "Share my location",
                                     "You are visible to others",
@@ -480,7 +489,30 @@ fun CreateSessionDialog(
                                     else MaterialTheme.colorScheme.secondaryContainer,
                                     MaterialTheme.colorScheme.secondary
                                 )
-                                Spacer(modifier = Modifier.height(70.dp))
+                                Spacer(modifier = Modifier.height(16.dp))
+                                // Destination Check-In Toggle
+                                SettingToggleCard(
+                                    "Destination Check-In",
+                                    "Users can mark arrived when near",
+                                    Icons.Default.TaskAlt,
+                                    isArrivalTrackingEnabled,
+                                    { isChecked ->
+                                        if (isChecked && toPoint == null) {
+                                            Toast.makeText(
+                                                context, "Please set a destination first",
+                                                Toast.LENGTH_SHORT
+                                            )
+                                                .show()
+                                            isArrivalTrackingEnabled = false
+                                        } else {
+                                            isArrivalTrackingEnabled = isChecked
+                                        }
+                                    },
+                                    checkedColor = Color(0xFF4CAF50).copy(
+                                        alpha = if (isDark) 0.15f else 0.1f
+                                    ),
+                                    iconColor = Color(0xFF4CAF50)
+                                )
                             }
 
                             //  BUTTONS INSIDE SCROLLABLE AREA
@@ -562,6 +594,7 @@ fun CreateSessionDialog(
                                                     isUsersVisible = isUsersVisible,
                                                     isSharingAllowed = isSharingAllowed,
                                                     isHostSharing = isSharingMyLocation,
+                                                    isArrivalTrackingEnabled = isArrivalTrackingEnabled,
                                                     hostId = existingSession?.hostId ?: "",
                                                     joinCode = existingSession?.joinCode ?: "",
                                                     status = existingSession?.status ?: "Live",
@@ -631,7 +664,7 @@ fun RepeatingIconButton(
     contentColor: Color = MaterialTheme.colorScheme.onSurface,
     content: @Composable () -> Unit
 ) {
-    val haptic = LocalHapticFeedback.current
+    val context = LocalContext.current
     val interactionSource = remember { MutableInteractionSource() }
     val currentOnClick by rememberUpdatedState(onClick)
 
@@ -654,7 +687,7 @@ fun RepeatingIconButton(
                                 delay(500)
                                 while (isActive) {
                                     currentOnClick()
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    HapticHelper.trigger(context, HapticHelper.Type.LIGHT)
                                     delay(100)
                                 }
                             }
@@ -664,7 +697,7 @@ fun RepeatingIconButton(
                                 job.cancel()
                                 if (success) {
                                     currentOnClick()
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    HapticHelper.trigger(context, HapticHelper.Type.LIGHT)
                                 }
                             } else {
                                 job.cancel()
@@ -695,11 +728,11 @@ fun SettingToggleCard(
     iconColor: Color
 ) {
     val isDark = isSystemInDarkTheme()
-    val haptic = LocalHapticFeedback.current
+    val context = LocalContext.current
     Surface(
         onClick = {
             onCheckedChange(!isChecked)
-            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            HapticHelper.trigger(context, HapticHelper.Type.MEDIUM)
         },
         shape = RoundedCornerShape(20.dp),
         color = if (isChecked) checkedColor else if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surface,
@@ -736,7 +769,7 @@ fun SettingToggleCard(
                 checked = isChecked,
                 onCheckedChange = {
                     onCheckedChange(it)
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    HapticHelper.trigger(context, HapticHelper.Type.MEDIUM)
                 },
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = Color.White,

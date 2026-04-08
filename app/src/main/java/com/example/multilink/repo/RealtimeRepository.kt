@@ -406,7 +406,8 @@ class RealtimeRepository {
             "durationVal" to session.durationVal,
             "durationUnit" to session.durationUnit,
             "maxPeople" to session.maxPeople,
-            "isSharingAllowed" to session.isSharingAllowed
+            "isSharingAllowed" to session.isSharingAllowed,
+            "isArrivalTrackingEnabled" to session.isArrivalTrackingEnabled
         )
 
         return try {
@@ -473,6 +474,8 @@ class RealtimeRepository {
                         .getValue(Boolean::class.java) ?: true,
                     isHostSharing = snapshot.child("isHostSharing")
                         .getValue(Boolean::class.java) ?: true,
+                    isArrivalTrackingEnabled = snapshot.child("isArrivalTrackingEnabled")
+                        .getValue(Boolean::class.java) ?: false,
                     activeUsers = pCount
                 )
 
@@ -611,6 +614,10 @@ class RealtimeRepository {
                                             .getValue(Boolean::class.java) ?: true,
                                         isHostSharing = child.child("isHostSharing")
                                             .getValue(Boolean::class.java) ?: true,
+                                        isArrivalTrackingEnabled = child.child(
+                                            "isArrivalTrackingEnabled"
+                                        )
+                                            .getValue(Boolean::class.java) ?: false,
                                         activeUsers = userCount
                                     )
                                 )
@@ -674,7 +681,8 @@ class RealtimeRepository {
                     type = "info", // Blue Info icon
                     title = "New Participant",
                     message = "${currentUser.displayName ?: "A user"} joined '$sessionTitle'.",
-                    sessionId = sessionId
+                    sessionId = sessionId,
+                    actorId = currentUser.uid
                 )
             }
 
@@ -709,7 +717,8 @@ class RealtimeRepository {
             "maxPeople" to session.maxPeople,
             "isUsersVisible" to session.isUsersVisible,
             "isSharingAllowed" to session.isSharingAllowed,
-            "isHostSharing" to session.isHostSharing
+            "isHostSharing" to session.isHostSharing,
+            "isArrivalTrackingEnabled" to session.isArrivalTrackingEnabled
         )
         db.child("sessions")
             .child(session.id)
@@ -815,6 +824,25 @@ class RealtimeRepository {
         }
     }
 
+    //Marks user as arrived
+    suspend fun markUserAsArrived(sessionId: String, targetUserId: String) {
+        try {
+            val updates = mapOf(
+                "hasArrived" to true,
+                "status" to "Arrived",
+                "lastUpdated" to System.currentTimeMillis()
+            )
+            db.child("sessions")
+                .child(sessionId)
+                .child("users")
+                .child(targetUserId)
+                .updateChildren(updates)
+                .await()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
 
     suspend fun leaveSession(sessionId: String) {
         val currentUser = auth.currentUser ?: return
@@ -869,6 +897,8 @@ class RealtimeRepository {
                         .getValue(Boolean::class.java) ?: true,
                     isHostSharing = snapshot.child("isHostSharing")
                         .getValue(Boolean::class.java) ?: true,
+                    isArrivalTrackingEnabled = snapshot.child("isArrivalTrackingEnabled")
+                        .getValue(Boolean::class.java) ?: false,
                     activeUsers = pCount
                 )
 
@@ -884,7 +914,8 @@ class RealtimeRepository {
                         type = "alert",
                         title = "Participant Left",
                         message = "${currentUser.displayName ?: "A user"} left '$title'.",
-                        sessionId = sessionId
+                        sessionId = sessionId,
+                        actorId = userId
                     )
                 }
             }
@@ -1178,32 +1209,44 @@ class RealtimeRepository {
             return@callbackFlow
         }
 
-        val ref = db.child("user_activity_feed")
+        val ref = db.child("users")
             .child(userId)
+            .child("activity_feed")
+
+        val now = System.currentTimeMillis()
+        val sevenDaysAgo = now - (7L * 24 * 60 * 60 * 1000)
+
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 try {
                     val feed = mutableListOf<ActivityFeedItem>()
-                    // ⭐ FIXED: Manual parsing handles missing or weird data safely
                     if (snapshot.exists()) {
                         for (child in snapshot.children) {
                             val map = child.value as? Map<*, *> ?: continue
-                            val item = ActivityFeedItem(
-                                id = map["id"] as? String ?: "",
-                                type = map["type"] as? String ?: "alert",
-                                title = map["title"] as? String ?: "",
-                                message = map["message"] as? String ?: "",
-                                sessionId = map["sessionId"] as? String ?: "",
-                                timestamp = (map["timestamp"] as? Number)?.toLong() ?: 0L,
-                                isRead = map["isRead"] as? Boolean ?: false
-                            )
-                            feed.add(item)
+                            val timestamp = (map["timestamp"] as? Number)?.toLong() ?: 0L
+
+                            // ⭐ ADDED: Check if item is older than 7 days
+                            if (timestamp < sevenDaysAgo) {
+                                child.ref.removeValue() // Wipe from DB immediately
+                            } else {
+                                val item = ActivityFeedItem(
+                                    id = map["id"] as? String ?: "",
+                                    type = map["type"] as? String ?: "alert",
+                                    title = map["title"] as? String ?: "",
+                                    message = map["message"] as? String ?: "",
+                                    sessionId = map["sessionId"] as? String ?: "",
+                                    timestamp = timestamp,
+                                    isRead = map["isRead"] as? Boolean ?: false,
+                                    actorId = map["actorId"] as? String ?: ""
+                                )
+                                feed.add(item)
+                            }
                         }
                     }
                     trySend(feed.sortedByDescending { it.timestamp })
                 } catch (e: Exception) {
                     e.printStackTrace()
-                    trySend(emptyList()) // Fallback to empty list on error
+                    trySend(emptyList())
                 }
             }
 
@@ -1216,13 +1259,19 @@ class RealtimeRepository {
     }
 
     suspend fun sendFeedItem(
-        targetUserId: String, type: String, title: String, message: String, sessionId: String = ""
+        targetUserId: String,
+        type: String,
+        title: String,
+        message: String,
+        sessionId: String = "",
+        actorId: String = ""
     ) {
         try {
-            val feedRef = db.child("user_activity_feed")
+            val feedRef = db.child("users")
                 .child(targetUserId)
-                .push()
-            val itemId = feedRef.key ?: return
+                .child("activity_feed")
+            val newItemRef = feedRef.push()
+            val itemId = newItemRef.key ?: return
 
             val newItem = ActivityFeedItem(
                 id = itemId,
@@ -1231,10 +1280,32 @@ class RealtimeRepository {
                 message = message,
                 sessionId = sessionId,
                 timestamp = System.currentTimeMillis(),
-                isRead = false
+                isRead = false,
+                actorId = actorId
             )
-            feedRef.setValue(newItem)
+
+            newItemRef.setValue(newItem)
                 .await()
+
+            val snapshot = feedRef.get()
+                .await()
+            if (snapshot.childrenCount > 100) {
+
+                val allItems = snapshot.children.mapNotNull { child ->
+                    val ts = (child.child("timestamp").value as? Number)?.toLong() ?: 0L
+                    child.key to ts
+                }
+                    .sortedBy { it.second } // Oldest at the top
+
+                val itemsToDelete = allItems.size - 100
+                for (i in 0 until itemsToDelete) {
+                    val keyToDelete = allItems[i].first
+                    if (keyToDelete != null) {
+                        feedRef.child(keyToDelete)
+                            .removeValue()
+                    }
+                }
+            }
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -1243,8 +1314,9 @@ class RealtimeRepository {
     suspend fun markFeedItemRead(itemId: String) {
         val userId = auth.currentUser?.uid ?: return
         try {
-            db.child("user_activity_feed")
+            db.child("users")
                 .child(userId)
+                .child("activity_feed")
                 .child(itemId)
                 .child("isRead")
                 .setValue(true)
@@ -1257,8 +1329,9 @@ class RealtimeRepository {
     suspend fun deleteFeedItem(itemId: String) {
         val userId = auth.currentUser?.uid ?: return
         try {
-            db.child("user_activity_feed")
+            db.child("users")
                 .child(userId)
+                .child("activity_feed")
                 .child(itemId)
                 .removeValue()
                 .await()

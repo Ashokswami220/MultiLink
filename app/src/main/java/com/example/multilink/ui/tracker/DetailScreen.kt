@@ -19,9 +19,12 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBackIos
 import androidx.compose.material.icons.automirrored.filled.Message
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.Speed
@@ -48,7 +51,6 @@ import com.example.multilink.model.SessionParticipant
 import com.example.multilink.repo.RealtimeRepository
 import com.example.multilink.repo.RouteRepository
 import com.example.multilink.service.LocationService
-import com.example.multilink.ui.components.MapTopBar
 import com.example.multilink.ui.components.MultiLinkMap
 import com.example.multilink.ui.components.MyLocationFab
 import com.example.multilink.ui.components.SessionActionHandler
@@ -69,6 +71,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.multilink.utils.HapticHelper
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -88,6 +91,16 @@ fun DetailScreen(
     val token = BuildConfig.MAPBOX_ACCESS_TOKEN
     val routeRepository = remember { RouteRepository(token) }
     val scope = rememberCoroutineScope()
+
+    val stateLoadingStr = stringResource(R.string.state_loading)
+    val msgSessionEndedStr = stringResource(R.string.msg_session_ended)
+    val msgUserLeftStr = stringResource(R.string.msg_user_left_session)
+    val errorNoPhoneStr = stringResource(R.string.error_no_phone)
+    val errorMapsNotInstalledStr = stringResource(R.string.error_maps_not_installed)
+    val errorDestNotSetStr = stringResource(R.string.error_dest_not_set)
+    val errorStartNotSetStr = stringResource(R.string.error_start_loc_not_set)
+    val errorUserNotAvailStr = stringResource(R.string.error_user_loc_not_available)
+    val errorWhatsappNotInstalledStr = stringResource(R.string.error_whatsapp_not_installed)
 
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, sessionId, userId) {
@@ -130,9 +143,9 @@ fun DetailScreen(
 
     val actionHandler = remember { SessionActionHandler(context, repository, scope) }
 
-    val user = remember(uiState.participants, userId) {
+    val user = remember(uiState.participants, userId, stateLoadingStr) {
         uiState.participants.find { it.id == userId }
-            ?: SessionParticipant(id = userId, name = context.getString(R.string.state_loading))
+            ?: SessionParticipant(id = userId, name = stateLoadingStr)
     }
 
     val isUserInSession = remember(uiState.participants, userId) {
@@ -171,9 +184,7 @@ fun DetailScreen(
 
         if (!uiState.isSessionActive) {
             isNavigatingOut = true
-            Toast.makeText(
-                context, context.getString(R.string.msg_session_ended), Toast.LENGTH_SHORT
-            )
+            Toast.makeText(context, msgSessionEndedStr, Toast.LENGTH_SHORT)
                 .show()
             onSessionEnded()
         } else if (uiState.isRemoved) {
@@ -183,18 +194,14 @@ fun DetailScreen(
                 .show()
             onSessionEnded()
         } else if (isPaused && !isAdmin) {
-            // Kick non-admins, but keep service alive
             isNavigatingOut = true
             Toast.makeText(context, "Session paused by Host", Toast.LENGTH_LONG)
                 .show()
             onSessionPaused()
         } else if (uiState.participants.isNotEmpty() && !isUserInSession && !isRemoving) {
             isNavigatingOut = true
-            Toast.makeText(
-                context, context.getString(R.string.msg_user_left_session), Toast.LENGTH_SHORT
-            )
+            Toast.makeText(context, msgUserLeftStr, Toast.LENGTH_SHORT)
                 .show()
-            // Leaves us on the Live Tracking Map if the target user drops
             onBackClick()
         }
     }
@@ -267,30 +274,34 @@ fun DetailScreen(
     val userSpeed = user.speed
     val speedKmh = (userSpeed * 3.6).toInt()
 
-    val timeLeft = remember(distToEnd, speedKmh) {
+    val calculatedMinutes = remember(distToEnd, speedKmh) {
         if (speedKmh > 1 && distToEnd != "..." && distToEnd.contains(" ")) {
             try {
                 val parts = distToEnd.split(" ")
                 val distVal = parts[0].toDoubleOrNull() ?: 0.0
                 val isKm = parts[1] == "km"
 
-                // Convert to KM so division by KM/H works properly
                 val distKm = if (isKm) distVal else distVal / 1000.0
-
                 val hours = distKm / speedKmh
-                val minutes = (hours * 60).toInt()
-
-                if (minutes > 60) {
-                    context.getString(R.string.format_time_hr_min, minutes / 60, minutes % 60)
-                } else {
-                    context.getString(R.string.format_time_min, minutes)
-                }
+                (hours * 60).toInt()
             } catch (_: Exception) {
-                "--"
+                null
             }
         } else {
-            "--"
+            null
         }
+    }
+
+    val timeLeft = if (calculatedMinutes != null) {
+        if (calculatedMinutes > 60) {
+            stringResource(
+                R.string.format_time_hr_min, calculatedMinutes / 60, calculatedMinutes % 60
+            )
+        } else {
+            stringResource(R.string.format_time_min, calculatedMinutes)
+        }
+    } else {
+        "--"
     }
 
     val configuration = LocalConfiguration.current
@@ -321,9 +332,12 @@ fun DetailScreen(
             containerColor = Color.Transparent,
             sheetDragHandle = null,
             sheetContent = {
+                val sheetScrollState = rememberScrollState()
+
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .verticalScroll(sheetScrollState)
                         .padding(horizontal = dimensionResource(R.dimen.padding_extra_large))
                         .navigationBarsPadding()
                 ) {
@@ -341,69 +355,150 @@ fun DetailScreen(
                     )
 
                     // Header Row
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(contentAlignment = Alignment.BottomEnd) {
-                            Surface(
-                                shape = CircleShape,
-                                color = MaterialTheme.colorScheme.primaryContainer,
-                                modifier = Modifier.size(
-                                    dimensionResource(R.dimen.profile_image_large)
-                                )
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    if (userPhoto != null) {
-                                        AsyncImage(
-                                            model = ImageRequest.Builder(LocalContext.current)
-                                                .data(userPhoto)
-                                                .crossfade(true)
-                                                .build(),
-                                            contentDescription = "User Photo",
-                                            modifier = Modifier.fillMaxSize(),
-                                            contentScale = ContentScale.Crop
-                                        )
-                                    } else {
-                                        // Fallback to the default person icon if no photo exists
-                                        Icon(
-                                            Icons.Default.Person, null,
-                                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                            modifier = Modifier.size(
-                                                dimensionResource(R.dimen.icon_large)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(contentAlignment = Alignment.BottomEnd) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    modifier = Modifier.size(
+                                        dimensionResource(R.dimen.profile_image_large)
+                                    )
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        if (userPhoto != null) {
+                                            AsyncImage(
+                                                model = ImageRequest.Builder(LocalContext.current)
+                                                    .data(userPhoto)
+                                                    .crossfade(true)
+                                                    .build(),
+                                                contentDescription = "User Photo",
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentScale = ContentScale.Crop
                                             )
-                                        )
+                                        } else {
+                                            Icon(
+                                                Icons.Default.Person, null,
+                                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                modifier = Modifier.size(
+                                                    dimensionResource(R.dimen.icon_large)
+                                                )
+                                            )
+                                        }
                                     }
                                 }
+                                Box(
+                                    modifier = Modifier
+                                        .size(dimensionResource(R.dimen.status_dot_large))
+                                        .clip(CircleShape)
+                                        .background(
+                                            if (user.status == "Online") Color.Green else Color.Gray
+                                        )
+                                        .border(
+                                            dimensionResource(R.dimen.stroke_width_standard),
+                                            MaterialTheme.colorScheme.surface, CircleShape
+                                        )
+                                )
                             }
-                            Box(
-                                modifier = Modifier
-                                    .size(dimensionResource(R.dimen.status_dot_large))
-                                    .clip(CircleShape)
-                                    .background(
-                                        if (user.status == "Online") Color.Green else Color.Gray
-                                    )
-                                    .border(
-                                        dimensionResource(R.dimen.stroke_width_standard),
-                                        MaterialTheme.colorScheme.surface, CircleShape
-                                    )
-                            )
-                        }
-                        Spacer(
-                            modifier = Modifier.width(dimensionResource(R.dimen.padding_standard))
-                        )
-                        Column {
-                            Text(
-                                user.name, style = MaterialTheme.typography.headlineSmall.copy(
-                                    fontWeight = FontWeight.Bold
+                            Spacer(
+                                modifier = Modifier.width(
+                                    dimensionResource(R.dimen.padding_standard)
                                 )
                             )
-                            Text(
-                                userPhone.ifEmpty {
-                                    stringResource(
-                                        R.string.placeholder_no_contact
+                            Column {
+                                Text(
+                                    user.name, style = MaterialTheme.typography.headlineSmall.copy(
+                                        fontWeight = FontWeight.Bold
                                     )
+                                )
+                                Text(
+                                    userPhone.ifEmpty {
+                                        stringResource(
+                                            R.string.placeholder_no_contact
+                                        )
+                                    },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        // Dropdown Menu Button integrated into the sheet
+                        Box {
+                            var menuExpanded by remember { mutableStateOf(false) }
+                            Surface(
+                                onClick = {
+                                    HapticHelper.trigger(context, HapticHelper.Type.LIGHT)
+                                    menuExpanded = true
                                 },
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Default.MoreVert,
+                                        contentDescription = "More Options",
+                                        tint = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            }
+
+                            DropdownMenu(
+                                expanded = menuExpanded,
+                                onDismissRequest = { menuExpanded = false },
+                                modifier = Modifier.background(MaterialTheme.colorScheme.surface)
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Session Info") },
+                                    onClick = {
+                                        HapticHelper.trigger(context, HapticHelper.Type.LIGHT)
+                                        menuExpanded = false
+                                        setShowInfoDialog(true)
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Default.Info, contentDescription = null
+                                        )
+                                    }
+                                )
+
+                                if (uiState.isCurrentUserAdmin && uiState.currentUserId != userId) {
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                "Remove User",
+                                                color = MaterialTheme.colorScheme.error
+                                            )
+                                        },
+                                        onClick = {
+                                            HapticHelper.trigger(context, HapticHelper.Type.ERROR)
+                                            menuExpanded = false
+                                            isRemoving = true
+                                            actionHandler.onRemoveUser(
+                                                sessionId, userId, user.name
+                                            ) {
+                                                onBackClick()
+                                            }
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                Icons.Default.PersonRemove,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.error
+                                            )
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -422,10 +517,7 @@ fun DetailScreen(
                             if (userPhone.isNotEmpty()) context.startActivity(
                                 Intent(Intent.ACTION_DIAL, "tel:$userPhone".toUri())
                             )
-                            else Toast.makeText(
-                                context, context.getString(R.string.error_no_phone),
-                                Toast.LENGTH_SHORT
-                            )
+                            else Toast.makeText(context, errorNoPhoneStr, Toast.LENGTH_SHORT)
                                 .show()
                         }
                         ActionItem(
@@ -437,17 +529,14 @@ fun DetailScreen(
                             if (userPhone.isNotEmpty()) context.startActivity(
                                 Intent(Intent.ACTION_VIEW, "sms:$userPhone".toUri())
                             )
-                            else Toast.makeText(
-                                context, context.getString(R.string.error_no_phone),
-                                Toast.LENGTH_SHORT
-                            )
+                            else Toast.makeText(context, errorNoPhoneStr, Toast.LENGTH_SHORT)
                                 .show()
                         }
                         ActionItem(
                             Icons.Default.Whatsapp, stringResource(R.string.action_whatsapp),
                             Color(0xFFE0F2F1), Color(0xFF00695C)
                         ) {
-                            openWhatsApp(context, userPhone)
+                            openWhatsApp(context, userPhone, errorWhatsappNotInstalledStr)
                         }
                         ActionItem(
                             Icons.Default.Directions, stringResource(R.string.action_navigate),
@@ -464,17 +553,12 @@ fun DetailScreen(
                                     context.startActivity(intent)
                                 } catch (_: Exception) {
                                     Toast.makeText(
-                                        context, context.getString(
-                                            R.string.error_maps_not_installed
-                                        ), Toast.LENGTH_SHORT
+                                        context, errorMapsNotInstalledStr, Toast.LENGTH_SHORT
                                     )
                                         .show()
                                 }
                             } else {
-                                Toast.makeText(
-                                    context, context.getString(R.string.error_dest_not_set),
-                                    Toast.LENGTH_SHORT
-                                )
+                                Toast.makeText(context, errorDestNotSetStr, Toast.LENGTH_SHORT)
                                     .show()
                             }
                         }
@@ -608,72 +692,46 @@ fun DetailScreen(
                     visible = !isFullScreen,
                     enter = slideInVertically(initialOffsetY = { -it }),
                     exit = slideOutVertically(targetOffsetY = { -it }),
-                    modifier = Modifier.align(Alignment.TopCenter)
+                    modifier = Modifier.align(Alignment.TopStart)
                 ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(
-                                top = WindowInsets.statusBars.asPaddingValues()
-                                    .calculateTopPadding() + dimensionResource(
-                                    R.dimen.padding_small
-                                )
-                            )
+                            .statusBarsPadding()
+                            .padding(16.dp)
                     ) {
-                        MapTopBar(
-                            startName = uiState.startName,
-                            endName = uiState.endName,
-                            isViewerAdmin = uiState.isCurrentUserAdmin,
-                            isTargetUserSelf = (uiState.currentUserId == userId),
-                            onBackClick = onBackClick,
-                            onStartClick = {
-                                if (uiState.startPoint != null) mapViewportState.flyTo(
-                                    CameraOptions.Builder()
-                                        .center(uiState.startPoint)
-                                        .zoom(16.0)
-                                        .build()
-                                ) else Toast.makeText(
-                                    context, context.getString(R.string.error_start_loc_not_set),
-                                    Toast.LENGTH_SHORT
+                        // Clean Floating Back Button
+                        Surface(
+                            onClick = {
+                                HapticHelper.trigger(context, HapticHelper.Type.LIGHT)
+                                onBackClick()
+                            },
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surface,
+                            shadowElevation = 4.dp,
+                            modifier = Modifier.size(48.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.ArrowBackIos,
+                                    contentDescription = "Back",
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.size(20.dp)
                                 )
-                                    .show()
-                            },
-                            onEndClick = {
-                                if (uiState.endPoint != null) mapViewportState.flyTo(
-                                    CameraOptions.Builder()
-                                        .center(uiState.endPoint)
-                                        .zoom(16.0)
-                                        .build()
-                                ) else Toast.makeText(
-                                    context, context.getString(R.string.error_dest_not_set),
-                                    Toast.LENGTH_SHORT
-                                )
-                                    .show()
-                            },
-                            onCallClick = { actionHandler.onCall(userPhone) },
-                            onRemoveClick = {
-                                isRemoving = true // 1. Flag ON
-                                actionHandler.onRemoveUser(sessionId, userId, user.name) {
-                                    onBackClick() // 2. Manual Pop
-                                }
-                            },
-                            onInfoClick = { setShowInfoDialog(true) }
+                            }
+                        }
 
-                        )
-
+                        // Floating Chips
                         AnimatedVisibility(
                             visible = showMapChips && uiState.endPoint != null,
                             enter = fadeIn(),
                             exit = fadeOut()
                         ) {
                             Column(
-                                modifier = Modifier.padding(
-                                    start = dimensionResource(R.dimen.padding_standard),
-                                    top = dimensionResource(R.dimen.padding_medium)
-                                ),
+                                modifier = Modifier.padding(top = 16.dp),
                                 verticalArrangement = Arrangement.spacedBy(
                                     dimensionResource(R.dimen.padding_small)
-                                ) // Vertical spacing
+                                )
                             ) {
                                 StatusChip(
                                     Icons.Default.SportsScore, distToEnd,
@@ -727,8 +785,7 @@ fun DetailScreen(
                                         .build()
                                 )
                                 else Toast.makeText(
-                                    context, context.getString(R.string.error_start_loc_not_set),
-                                    Toast.LENGTH_SHORT
+                                    context, errorStartNotSetStr, Toast.LENGTH_SHORT
                                 )
                                     .show()
                             },
@@ -740,9 +797,7 @@ fun DetailScreen(
                                         .build()
                                 )
                                 else Toast.makeText(
-                                    context,
-                                    context.getString(R.string.error_user_loc_not_available),
-                                    Toast.LENGTH_SHORT
+                                    context, errorUserNotAvailStr, Toast.LENGTH_SHORT
                                 )
                                     .show()
                             },
@@ -753,10 +808,7 @@ fun DetailScreen(
                                         .zoom(16.0)
                                         .build()
                                 )
-                                else Toast.makeText(
-                                    context, context.getString(R.string.error_dest_not_set),
-                                    Toast.LENGTH_SHORT
-                                )
+                                else Toast.makeText(context, errorDestNotSetStr, Toast.LENGTH_SHORT)
                                     .show()
                             }
                         )
@@ -915,7 +967,7 @@ fun InfoCard(
     }
 }
 
-fun openWhatsApp(context: Context, number: String) {
+fun openWhatsApp(context: Context, number: String, errorMsg: String) {
     try {
         val cleanNumber = number.replace(Regex("[^0-9]"), "")
         val url = "https://api.whatsapp.com/send?phone=$cleanNumber"
@@ -923,9 +975,7 @@ fun openWhatsApp(context: Context, number: String) {
         i.data = url.toUri()
         context.startActivity(i)
     } catch (_: Exception) {
-        Toast.makeText(
-            context, context.getString(R.string.error_whatsapp_not_installed), Toast.LENGTH_SHORT
-        )
+        Toast.makeText(context, errorMsg, Toast.LENGTH_SHORT)
             .show()
     }
 }

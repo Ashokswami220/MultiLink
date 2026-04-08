@@ -280,6 +280,16 @@ class LocationService : Service() {
                                         val status =
                                             snapshot.getValue(String::class.java) ?: "Online"
 
+                                        // BATTERY SAVER - Kill service if arrived!
+                                        if (status == "Arrived") {
+                                            isServiceActive = false
+                                            shouldUpdateStatusOnStop =
+                                                false // Already marked arrived
+                                            stopLocationUpdates()
+                                            stopSelf()
+                                            return
+                                        }
+
                                         if (isSessionPaused) return
 
                                         if (status == "Paused" && isServiceActive) {
@@ -296,7 +306,7 @@ class LocationService : Service() {
                                     }
                                 }
                             userRef.addValueEventListener(userStatusListener)
-                        }
+                        }///
                     }
                 } else {
                     stopSelf()

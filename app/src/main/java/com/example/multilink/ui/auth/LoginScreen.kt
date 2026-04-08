@@ -23,13 +23,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.credentials.CredentialManager
 import androidx.credentials.GetCredentialRequest
+import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.multilink.R
 import com.example.multilink.ui.theme.MultiLinkTheme
 import com.example.multilink.ui.viewmodel.MultiLinkViewModel
-import com.google.android.libraries.identity.googleid.GetGoogleIdOption
-import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import kotlinx.coroutines.launch
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
+import androidx.credentials.exceptions.NoCredentialException
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 
 @Composable
 fun LoginScreen(
@@ -43,10 +46,8 @@ fun LoginScreen(
     val isPortrait = configuration.orientation == Configuration.ORIENTATION_PORTRAIT
     val coroutineScope = rememberCoroutineScope()
 
-    // ⭐ WEB CLIENT ID
     val webClientId = "1088420870250-3vlqpo3dfaeej8e9tg3edb8kao8j3dg8.apps.googleusercontent.com"
 
-    // ⭐ NEW: Credential Manager Init
     val credentialManager = CredentialManager.create(context)
 
     Scaffold(
@@ -73,7 +74,6 @@ fun LoginScreen(
                 .padding(horizontal = 24.dp)
                 .verticalScroll(scrollState), // Keeps it scrollable
             horizontalAlignment = Alignment.CenterHorizontally,
-            // ⭐ FIX: Align content in the center vertically
             verticalArrangement = Arrangement.Center
         ) {
             // Adjust spacer based on orientation to keep it centered but not cramped
@@ -85,7 +85,9 @@ fun LoginScreen(
 
             Text(
                 text = "MultiLink",
-                style = MaterialTheme.typography.displayMedium.copy(fontWeight = FontWeight.ExtraBold),
+                style = MaterialTheme.typography.displayMedium.copy(
+                    fontWeight = FontWeight.ExtraBold
+                ),
                 color = MaterialTheme.colorScheme.primary
             )
             Spacer(modifier = Modifier.height(8.dp))
@@ -122,7 +124,8 @@ fun LoginScreen(
 
                             // 3. Handle Result
                             val credential = result.credential
-                            val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(credential.data)
+                            val googleIdTokenCredential =
+                                GoogleIdTokenCredential.createFrom(credential.data)
                             val idToken = googleIdTokenCredential.idToken
 
                             // 4. Send to ViewModel (This matches the new String parameter)
@@ -130,27 +133,79 @@ fun LoginScreen(
                                 if (errorMsg == null) {
                                     onLoginSuccess()
                                 } else {
-                                    Toast.makeText(context, "Login Failed: $errorMsg", Toast.LENGTH_LONG).show()
+                                    Toast.makeText(
+                                        context, "Login Failed: $errorMsg", Toast.LENGTH_LONG
+                                    )
+                                        .show()
                                 }
                             }
 
+                        } catch (_: NoCredentialException) {
+                            try {
+                                val signInWithGoogleOption =
+                                    GetSignInWithGoogleOption.Builder(webClientId)
+                                        .build()
+
+                                val fallbackRequest = GetCredentialRequest.Builder()
+                                    .addCredentialOption(signInWithGoogleOption)
+                                    .build()
+
+                                val fallbackResult = credentialManager.getCredential(
+                                    request = fallbackRequest,
+                                    context = context
+                                )
+
+                                val fallbackCredential = fallbackResult.credential
+                                val fallbackGoogleIdToken =
+                                    GoogleIdTokenCredential.createFrom(fallbackCredential.data)
+
+                                viewModel.signInWithGoogle(
+                                    fallbackGoogleIdToken.idToken
+                                ) { errorMsg ->
+                                    if (errorMsg == null) {
+                                        onLoginSuccess()
+                                    } else {
+                                        Toast.makeText(
+                                            context, "Login Failed: $errorMsg", Toast.LENGTH_LONG
+                                        )
+                                            .show()
+                                    }
+                                }
+                            } catch (fallbackEx: Exception) {
+                                if (fallbackEx !is GetCredentialCancellationException) {
+                                    Toast.makeText(
+                                        context, "Error: ${fallbackEx.message}", Toast.LENGTH_SHORT
+                                    )
+                                        .show()
+                                }
+                            }
                         } catch (e: Exception) {
-                            // Log.e("Auth", "Sign in cancelled or failed", e)
-                            if (e !is androidx.credentials.exceptions.GetCredentialCancellationException) {
-                                Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
+                            if (e !is GetCredentialCancellationException) {
+                                Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_SHORT)
+                                    .show()
                             }
                         }
                     }
                 },
                 enabled = !uiState.isLoading,
-                modifier = Modifier.fillMaxWidth().height(56.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
                 shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary
+                )
             ) {
                 if (uiState.isLoading) {
-                    CircularProgressIndicator(color = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(24.dp))
+                    CircularProgressIndicator(
+                        color = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(24.dp)
+                    )
                 } else {
-                    Text("Continue with Google", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                    Text(
+                        "Continue with Google", style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold
+                        )
+                    )
                 }
             }
 
@@ -162,21 +217,41 @@ fun LoginScreen(
 
 @Composable
 fun LoveFromBadge(modifier: Modifier = Modifier) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = modifier.border(2.dp, MaterialTheme.colorScheme.primary.copy(0.6f), RoundedCornerShape(12.dp)).padding(12.dp)) {
-        Card(shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surfaceContainerHigh), modifier = Modifier.fillMaxWidth().height(140.dp)) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally, modifier = modifier
+            .border(
+                2.dp, MaterialTheme.colorScheme.primary.copy(0.6f), RoundedCornerShape(12.dp)
+            )
+            .padding(12.dp)
+    ) {
+        Card(
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surfaceContainerHigh),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(140.dp)
+        ) {
             Box(Modifier.fillMaxSize(), Alignment.Center) {
-                Image(painterResource(R.drawable.logo_rajasthan2), "Logo", Modifier.size(150.dp), contentScale = ContentScale.Fit, colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurface))
+                Image(
+                    painterResource(R.drawable.logo_rajasthan2), "Logo", Modifier.size(150.dp),
+                    contentScale = ContentScale.Fit,
+                    colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurface)
+                )
             }
         }
         Spacer(Modifier.height(12.dp))
-        Text("LOVE FROM RAJASTHAN", style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold, letterSpacing = 2.sp), color = MaterialTheme.colorScheme.primary)
+        Text(
+            "LOVE FROM RAJASTHAN", style = MaterialTheme.typography.labelLarge.copy(
+                fontWeight = FontWeight.Bold, letterSpacing = 2.sp
+            ), color = MaterialTheme.colorScheme.primary
+        )
     }
 }
 
 @Preview
 @Composable
-fun PreviewLogin(){
-    MultiLinkTheme{
+fun PreviewLogin() {
+    MultiLinkTheme {
         LoginScreen(onLoginSuccess = {})
     }
 }

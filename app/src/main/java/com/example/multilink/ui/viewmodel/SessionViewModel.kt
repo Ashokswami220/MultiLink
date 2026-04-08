@@ -63,7 +63,8 @@ class SessionViewModel(
                 val now = System.currentTimeMillis()
                 _uiState.update { state ->
                     val refreshedParticipants = state.participants.map { user ->
-                        if (user.status != "Paused" && user.lastUpdated > 0 && (now - user.lastUpdated) > 40_000L) {
+                        // when they stop broadcasting their GPS to save battery!
+                        if (user.status != "Paused" && user.status != "Arrived" && user.lastUpdated > 0 && (now - user.lastUpdated) > 40_000L) {
                             user.copy(status = "Offline")
                         } else {
                             user
@@ -81,7 +82,9 @@ class SessionViewModel(
                 .collectLatest { dataMap ->
                     if (dataMap.isEmpty()) return@collectLatest
 
+                    // This automatically pulls isArrivalTrackingEnabled from SessionData.kt!
                     val fullSession = dataMap.toSessionData(sessionId)
+
                     val sLat = fullSession.startLat ?: 0.0
                     val sLng = fullSession.startLng ?: 0.0
                     val eLat = fullSession.endLat ?: 0.0
@@ -110,7 +113,8 @@ class SessionViewModel(
                                     .collectLatest { users ->
                                         val now = System.currentTimeMillis()
                                         val checkedUsers = users.map { user ->
-                                            if (user.status != "Paused" && user.lastUpdated > 0 && (now - user.lastUpdated) > 60_000L) {
+                                            // Protect "Arrived" users here too!
+                                            if (user.status != "Paused" && user.status != "Arrived" && user.lastUpdated > 0 && (now - user.lastUpdated) > 60_000L) {
                                                 user.copy(status = "Offline")
                                             } else user
                                         }

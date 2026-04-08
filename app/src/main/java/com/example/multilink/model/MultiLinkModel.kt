@@ -22,7 +22,8 @@ data class SessionData(
     val createdTimestamp: Long = 0L,
     val isSharingAllowed: Boolean = true,
     val isHostSharing: Boolean = true,
-    val activeUsers: Int = 1
+    val activeUsers: Int = 1,
+    val isArrivalTrackingEnabled: Boolean = false
 )
 
 fun Map<String, Any>.toSessionData(sessionId: String): SessionData {
@@ -69,7 +70,8 @@ data class SessionParticipant(
     val isCharging: Boolean = false,
     val status: String = "Online",
     val lastUpdated: Long = 0L,
-    val speed: Float = 0f
+    val speed: Float = 0f,
+    val hasArrived: Boolean = false
 )
 
 data class SearchResult(
@@ -124,20 +126,19 @@ data class SessionUiState(
     val sessionData: SessionData? = null
 )
 
-// Represents the user's lifetime stats
 data class UserStats(
     val totalDistanceMeters: Double = 0.0,
     val totalTimeSeconds: Long = 0L,
     val totalSessions: Int = 0
 )
 
-// Represents a single notification/invite in the feed
 data class ActivityFeedItem(
     val id: String = "",
-    val type: String = "alert", // Can be: "invite", "alert", or "info"
+    val type: String = "alert",
     val title: String = "",
     val message: String = "",
-    val sessionId: String = "", // Crucial so we can click "Accept" and join!
+    val sessionId: String = "",
     val timestamp: Long = System.currentTimeMillis(),
-    val isRead: Boolean = false
+    val isRead: Boolean = false,
+    val actorId: String = ""
 )

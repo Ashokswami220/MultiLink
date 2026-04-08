@@ -46,6 +46,7 @@
     <dimen name="icon_nav">24dp</dimen>
 
     <dimen name="text_nav_label">14sp</dimen>
+    <dimen name="text_nav_label_15">15sp</dimen>
 
     // See all screen
     <dimen name="grid_spacing">12dp</dimen>

@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.Group
@@ -54,7 +55,7 @@ fun SessionCard(
     onEditClick: () -> Unit,
     onInfoClick: () -> Unit,
     onNavigateClick: () -> Unit,
-    onArrivedClick: () -> Unit,
+    onArrivedClick: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -63,13 +64,37 @@ fun SessionCard(
     val isAdmin = data.hostId == currentUserId
 
     val clipboardManager = LocalClipboardManager.current
-    var isMenuExpanded by remember { mutableStateOf(false) }
-    var showStopWarning by remember { mutableStateOf(false) }
-    var showLeaveWarning by remember { mutableStateOf(false) }
+    val (isMenuExpanded, setMenuExpanded) = remember { mutableStateOf(false) }
+    val (showStopWarning, setShowStopWarning) = remember { mutableStateOf(false) }
+    val (showLeaveWarning, setShowLeaveWarning) = remember { mutableStateOf(false) }
 
     val canShare = isAdmin || data.isSharingAllowed
     val isPaused = data.status == "Paused"
     val isArrivalEnabled = data.isArrivalTrackingEnabled
+
+    var hasArrived by remember { mutableStateOf(false) }
+
+    DisposableEffect(data.id, currentUserId) {
+        val ref = com.google.firebase.database.FirebaseDatabase.getInstance()
+            .getReference("sessions/${data.id}/users/$currentUserId/hasArrived")
+
+        val listener = object : com.google.firebase.database.ValueEventListener {
+            override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
+                hasArrived = snapshot.getValue(Boolean::class.java) ?: false
+            }
+
+            override fun onCancelled(error: com.google.firebase.database.DatabaseError) {}
+        }
+
+        if (currentUserId.isNotEmpty()) {
+            ref.addValueEventListener(listener)
+        }
+
+        onDispose {
+            ref.removeEventListener(listener)
+        }
+    }
+
     val hasDest = data.endLat != null && data.endLat != 0.0
     val statusColor = if (isPaused) Color(0xFFFF9800) else Color(0xFF4CAF50)
     val statusText = if (isPaused) "PAUSED" else "LIVE"
@@ -118,44 +143,44 @@ fun SessionCard(
 
     if (showStopWarning) {
         AlertDialog(
-            onDismissRequest = { showStopWarning = false },
+            onDismissRequest = { setShowStopWarning(false) },
             title = { Text("Delete Session?") },
             text = { Text("This will permanently remove the session for everyone. Are you sure?") },
             confirmButton = {
                 Button(
-                    onClick = { showStopWarning = false; onStopClick() },
+                    onClick = { setShowStopWarning(false); onStopClick() },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.error
                     )
                 ) { Text("Delete") }
             },
-            dismissButton = { TextButton(onClick = { showStopWarning = false }) { Text("Cancel") } }
+            dismissButton = {
+                TextButton(onClick = { setShowStopWarning(false) }) {
+                    Text(
+                        "Cancel"
+                    )
+                }
+            }
         )
     }
     // User Leave Warning
     if (showLeaveWarning) {
         AlertDialog(
-            onDismissRequest = { showLeaveWarning = false },
+            onDismissRequest = { setShowLeaveWarning(false) },
             title = { Text("Leave Session?") },
             text = {
-                Text(
-                    "You will stop sharing your location. You can rejoin later using the code."
-                )
+                Text("You will stop sharing your location. You can rejoin later using the code.")
             },
             confirmButton = {
                 Button(
-                    onClick = { showLeaveWarning = false; onStopClick() },
+                    onClick = { setShowLeaveWarning(false); onStopClick() },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.error
                     )
                 ) { Text("Leave") }
             },
             dismissButton = {
-                TextButton(onClick = { showLeaveWarning = false }) {
-                    Text(
-                        "Cancel"
-                    )
-                }
+                TextButton(onClick = { setShowLeaveWarning(false) }) { Text("Cancel") }
             }
         )
     }
@@ -452,30 +477,27 @@ fun SessionCard(
                         // Admin & Live -> SHARE + PAUSE
                         if (isArrivalEnabled && data.isHostSharing) {
                             Button(
-                                onClick = onArrivedClick,
+                                onClick = { onArrivedClick(!hasArrived) },
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(44.dp),
                                 shape = RoundedCornerShape(16.dp),
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                    containerColor = if (hasArrived) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.secondaryContainer,
+                                    contentColor = if (hasArrived) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSecondaryContainer
                                 ),
                                 contentPadding = PaddingValues(horizontal = 4.dp)
                             ) {
                                 Icon(
-                                    Icons.Default.TaskAlt,
-                                    null,
-                                    modifier = Modifier.size(18.dp)
+                                    if (hasArrived) Icons.AutoMirrored.Filled.Undo else Icons.Default.TaskAlt,
+                                    null, modifier = Modifier.size(18.dp)
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    "Reached Dest",
+                                    if (hasArrived) "Undo reached" else "Reached dest",
                                     style = MaterialTheme.typography.labelMedium.copy(
                                         fontWeight = FontWeight.Bold
-                                    ),
-                                    maxLines = 1,
-                                    softWrap = false
+                                    ), maxLines = 1, softWrap = false
                                 )
                             }
                             Spacer(modifier = Modifier.width(12.dp))
@@ -576,29 +598,30 @@ fun SessionCard(
                         if (isArrivalEnabled) {
                             // Reached Dest (Soft Color) + Navigate
                             Button(
-                                onClick = onArrivedClick,
+                                onClick = { onArrivedClick(!hasArrived) },
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(44.dp),
                                 shape = RoundedCornerShape(16.dp),
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                    containerColor = if (hasArrived) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.secondaryContainer,
+                                    contentColor = if (hasArrived) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSecondaryContainer
                                 ),
                                 contentPadding = PaddingValues(horizontal = 4.dp)
                             ) {
-                                Icon(Icons.Default.TaskAlt, null, modifier = Modifier.size(18.dp))
+                                Icon(
+                                    if (hasArrived) Icons.AutoMirrored.Filled.Undo else Icons.Default.TaskAlt,
+                                    null, modifier = Modifier.size(18.dp)
+                                )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    "Reached Dest",
+                                    if (hasArrived) "Undo reached" else "Reached dest",
                                     style = MaterialTheme.typography.labelMedium.copy(
                                         fontWeight = FontWeight.Bold
-                                    ),
-                                    maxLines = 1,
-                                    softWrap = false
+                                    ), maxLines = 1, softWrap = false
                                 )
-
                             }
+
                             if (data.isUsersVisible) {
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Button(
@@ -712,7 +735,7 @@ fun SessionCard(
 
                 Box {
                     FilledTonalIconButton(
-                        onClick = { isMenuExpanded = true },
+                        onClick = { setMenuExpanded(true) },
                         modifier = Modifier.size(44.dp),
                         shape = RoundedCornerShape(16.dp),
                         colors = IconButtonDefaults.filledTonalIconButtonColors(
@@ -728,7 +751,7 @@ fun SessionCard(
 
                     DropdownMenu(
                         expanded = isMenuExpanded,
-                        onDismissRequest = { isMenuExpanded = false },
+                        onDismissRequest = { setMenuExpanded(false) },
                         shape = RoundedCornerShape(
                             dimensionResource(id = R.dimen.corner_menu_sheet)
                         ),
@@ -750,7 +773,7 @@ fun SessionCard(
                                         tint = MaterialTheme.colorScheme.error
                                     )
                                 },
-                                onClick = { isMenuExpanded = false; showStopWarning = true }
+                                onClick = { setMenuExpanded(false); setShowStopWarning(true) }
                             )
                         }
 
@@ -758,20 +781,20 @@ fun SessionCard(
                             DropdownMenuItem(
                                 text = { Text("Share Session") },
                                 leadingIcon = { Icon(Icons.Default.Share, null) },
-                                onClick = { isMenuExpanded = false; onShareClick() })
+                                onClick = { setMenuExpanded(false); onShareClick() })
                         }
 
                         DropdownMenuItem(
                             text = { Text("Session Info") },
                             leadingIcon = { Icon(Icons.Default.Info, null) },
-                            onClick = { isMenuExpanded = false; onInfoClick() }
+                            onClick = { setMenuExpanded(false); onInfoClick() }
                         )
 
                         if (isAdmin) {
                             DropdownMenuItem(
                                 text = { Text("Edit Session") },
                                 leadingIcon = { Icon(Icons.Default.Edit, null) },
-                                onClick = { isMenuExpanded = false; onEditClick() }
+                                onClick = { setMenuExpanded(false); onEditClick() }
                             )
                         }
 
@@ -789,7 +812,7 @@ fun SessionCard(
                                         tint = MaterialTheme.colorScheme.error
                                     )
                                 },
-                                onClick = { isMenuExpanded = false; showLeaveWarning = true }
+                                onClick = { setMenuExpanded(false); setShowLeaveWarning(true) }
                             )
                         }
                     }

@@ -26,6 +26,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBackIos
 import androidx.compose.material.icons.automirrored.filled.Message
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Timer
@@ -45,15 +46,11 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.multilink.BuildConfig
 import com.example.multilink.R
 import com.example.multilink.model.SessionParticipant
-import com.example.multilink.repo.RealtimeRepository
-import com.example.multilink.repo.RouteRepository
 import com.example.multilink.service.LocationService
 import com.example.multilink.ui.components.MultiLinkMap
 import com.example.multilink.ui.components.MyLocationFab
-import com.example.multilink.ui.components.SessionActionHandler
 import com.example.multilink.ui.components.SessionControlBar
 import com.example.multilink.ui.components.SessionMapContent
 import com.example.multilink.ui.components.dialogs.SessionInfoDialog
@@ -71,7 +68,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.multilink.ui.components.dialogs.ArrivedToggleDialog
+import com.example.multilink.ui.viewmodel.SessionUiEvent
 import com.example.multilink.utils.HapticHelper
+import kotlinx.coroutines.flow.collectLatest
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -86,11 +86,12 @@ fun DetailScreen(
     val viewModel: SessionViewModel = viewModel(factory = SessionViewModelFactory(sessionId))
     val uiState by viewModel.uiState.collectAsState()
 
-    val repository = remember { RealtimeRepository() }
+    // Observe processedParticipants to get cached user data instantly without network calls
+    val processedParticipants by viewModel.processedParticipants.collectAsState()
+    //  Observe the cached route points directly from the ViewModel
+    val realRoutePoints by viewModel.routePoints.collectAsState()
+
     val context = LocalContext.current
-    val token = BuildConfig.MAPBOX_ACCESS_TOKEN
-    val routeRepository = remember { RouteRepository(token) }
-    val scope = rememberCoroutineScope()
 
     val stateLoadingStr = stringResource(R.string.state_loading)
     val msgSessionEndedStr = stringResource(R.string.msg_session_ended)
@@ -102,75 +103,71 @@ fun DetailScreen(
     val errorUserNotAvailStr = stringResource(R.string.error_user_loc_not_available)
     val errorWhatsappNotInstalledStr = stringResource(R.string.error_whatsapp_not_installed)
 
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner, sessionId, userId) {
-        var isWatching = false
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_START) {
-                // Screen is visible/foregrounded
-                if (!isWatching) {
-                    repository.incrementUserWatchers(sessionId, userId)
-                    isWatching = true
-                }
-            } else if (event == Lifecycle.Event.ON_STOP) {
-                // Screen is hidden/backgrounded
-                if (isWatching) {
-                    repository.decrementUserWatchers(sessionId, userId)
-                    isWatching = false
-                }
-            }
-        }
 
-        lifecycleOwner.lifecycle.addObserver(observer)
-
-        onDispose {
-            // Safety cleanup when composable is destroyed
-            lifecycleOwner.lifecycle.removeObserver(observer)
-            if (isWatching) {
-                repository.decrementUserWatchers(sessionId, userId)
-                isWatching = false
-            }
-        }
+    val uiModel = remember(processedParticipants, userId) {
+        processedParticipants.find { it.participant.id == userId }
     }
-
-    val (showInfoDialog, setShowInfoDialog) = remember { mutableStateOf(false) }
-    if (showInfoDialog && uiState.sessionData != null) {
-        SessionInfoDialog(
-            session = uiState.sessionData!!,
-            onDismiss = { setShowInfoDialog(false) }
-        )
-    }
-
-    val actionHandler = remember { SessionActionHandler(context, repository, scope) }
-
-    val user = remember(uiState.participants, userId, stateLoadingStr) {
-        uiState.participants.find { it.id == userId }
-            ?: SessionParticipant(id = userId, name = stateLoadingStr)
-    }
+    val user = uiModel?.participant ?: SessionParticipant(id = userId, name = stateLoadingStr)
+    val userPhone = uiModel?.phoneNumber ?: ""
+    val userPhoto = uiModel?.photoUrl
 
     val isUserInSession = remember(uiState.participants, userId) {
         uiState.participants.any { it.id == userId }
     }
 
-    var isRemoving by remember { mutableStateOf(false) }
+    val (isFullScreen, setFullScreen) = remember { mutableStateOf(false) }
+    BackHandler(enabled = isFullScreen) { setFullScreen(false) }
 
-    var isFullScreen by remember { mutableStateOf(false) }
-    BackHandler(enabled = isFullScreen) { isFullScreen = false }
+    val (showInfoDialog, setShowInfoDialog) = remember { mutableStateOf(false) }
+    val (arrivedDialogState, setArrivedDialogState) = remember { mutableStateOf<Boolean?>(null) }
 
-    var userPhone by remember { mutableStateOf("") }
-    var userPhoto by remember { mutableStateOf<String?>(null) }
-    var realRoutePoints by remember { mutableStateOf<List<Point>>(emptyList()) }
+    if (showInfoDialog && uiState.sessionData != null) {
+        SessionInfoDialog(session = uiState.sessionData!!, onDismiss = { setShowInfoDialog(false) })
+    }
 
+    arrivedDialogState?.let { isArriving ->
+        ArrivedToggleDialog(
+            isArriving = isArriving,
+            onConfirm = {
+                setArrivedDialogState(null)
+                viewModel.toggleUserArrived(userId, isArriving)
+            },
+            onDismiss = { setArrivedDialogState(null) }
+        )
+    }
 
-    LaunchedEffect(userId) {
-        val profile = repository.getGlobalUserProfile(userId)
-        if (profile != null) {
-            userPhone = profile["phone"] ?: ""
-            userPhoto = profile["photoUrl"]?.takeIf { it.isNotEmpty() }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, sessionId, userId) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_START) {
+                viewModel.setSpecificUserWatching(userId, true)
+            } else if (event == Lifecycle.Event.ON_STOP) {
+                viewModel.setSpecificUserWatching(userId, false)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            viewModel.setSpecificUserWatching(userId, false)
         }
     }
 
-    // --- NAVIGATION LOGIC ---
+    // --- NEW: Observe UI Events from ViewModel ---
+    LaunchedEffect(Unit) {
+        viewModel.uiEvents.collectLatest { event ->
+            when (event) {
+                is SessionUiEvent.ShowToast -> Toast.makeText(
+                    context, event.message, Toast.LENGTH_SHORT
+                )
+                    .show()
+
+                is SessionUiEvent.NavigateBack -> onBackClick()
+                else -> {}
+            }
+        }
+    }
+
+    // --- NAVIGATION GUARDS ---
     var isNavigatingOut by remember { mutableStateOf(false) }
 
     LaunchedEffect(
@@ -198,19 +195,11 @@ fun DetailScreen(
             Toast.makeText(context, "Session paused by Host", Toast.LENGTH_LONG)
                 .show()
             onSessionPaused()
-        } else if (uiState.participants.isNotEmpty() && !isUserInSession && !isRemoving) {
+        } else if (uiState.participants.isNotEmpty() && !isUserInSession) {
             isNavigatingOut = true
             Toast.makeText(context, msgUserLeftStr, Toast.LENGTH_SHORT)
                 .show()
             onBackClick()
-        }
-    }
-
-
-    LaunchedEffect(uiState.startPoint, uiState.endPoint) {
-        if (uiState.startPoint != null && uiState.endPoint != null) {
-            val path = routeRepository.getRoute(uiState.startPoint!!, uiState.endPoint!!)
-            realRoutePoints = path.ifEmpty { listOf(uiState.startPoint!!, uiState.endPoint!!) }
         }
     }
 
@@ -225,8 +214,8 @@ fun DetailScreen(
             ) == PackageManager.PERMISSION_GRANTED
         ) {
             try {
-                val fusedClient = LocationServices.getFusedLocationProviderClient(context)
-                fusedClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
+                LocationServices.getFusedLocationProviderClient(context)
+                    .getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
                     .addOnSuccessListener { loc -> localLocationState = loc }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -241,14 +230,10 @@ fun DetailScreen(
         )
     }
 
-    val mapViewportState =
-        rememberMapViewportState {
-            setCameraOptions {
-                center(myRealPoint); zoom(14.0); pitch(
-                0.0
-            )
-            }
-        }
+    val mapViewportState = rememberMapViewportState {
+        setCameraOptions { center(myRealPoint); zoom(14.0); pitch(0.0) }
+    }
+
     LaunchedEffect(targetUserLocation) {
         targetUserLocation?.let {
             mapViewportState.flyTo(
@@ -278,42 +263,32 @@ fun DetailScreen(
         if (speedKmh > 1 && distToEnd != "..." && distToEnd.contains(" ")) {
             try {
                 val parts = distToEnd.split(" ")
-                val distVal = parts[0].toDoubleOrNull() ?: 0.0
-                val isKm = parts[1] == "km"
-
-                val distKm = if (isKm) distVal else distVal / 1000.0
+                val distKm =
+                    if (parts[1] == "km") parts[0].toDouble() else parts[0].toDouble() / 1000.0
                 val hours = distKm / speedKmh
                 (hours * 60).toInt()
             } catch (_: Exception) {
                 null
             }
-        } else {
-            null
-        }
+        } else null
     }
 
     val timeLeft = if (calculatedMinutes != null) {
-        if (calculatedMinutes > 60) {
-            stringResource(
-                R.string.format_time_hr_min, calculatedMinutes / 60, calculatedMinutes % 60
-            )
-        } else {
-            stringResource(R.string.format_time_min, calculatedMinutes)
-        }
-    } else {
-        "--"
-    }
+        if (calculatedMinutes > 60) stringResource(
+            R.string.format_time_hr_min, calculatedMinutes / 60, calculatedMinutes % 60
+        )
+        else stringResource(R.string.format_time_min, calculatedMinutes)
+    } else "--"
 
     val configuration = LocalConfiguration.current
-    val basePeekHeight =
-        if (configuration.orientation == Configuration.ORIENTATION_LANDSCAPE)
-            dimensionResource(R.dimen.peek_height_landscape)
-        else dimensionResource(R.dimen.peek_height_portrait)
+    val basePeekHeight = if (configuration.orientation == Configuration.ORIENTATION_LANDSCAPE)
+        dimensionResource(R.dimen.peek_height_landscape) else dimensionResource(
+        R.dimen.peek_height_portrait
+    )
 
     val animatedPeekHeight by animateDpAsState(
         targetValue = if (isFullScreen) 0.dp else basePeekHeight,
-        animationSpec = tween(durationMillis = 300),
-        label = "peekHeight"
+        animationSpec = tween(durationMillis = 300), label = "peekHeight"
     )
 
     val scaffoldState = rememberBottomSheetScaffoldState()
@@ -432,11 +407,12 @@ fun DetailScreen(
 
                         // Dropdown Menu Button integrated into the sheet
                         Box {
-                            var menuExpanded by remember { mutableStateOf(false) }
+                            val (menuExpanded, setMenuExpanded) = remember { mutableStateOf(false) }
+
                             Surface(
                                 onClick = {
                                     HapticHelper.trigger(context, HapticHelper.Type.LIGHT)
-                                    menuExpanded = true
+                                    setMenuExpanded(true)
                                 },
                                 shape = CircleShape,
                                 color = MaterialTheme.colorScheme.surfaceContainerHighest,
@@ -454,14 +430,16 @@ fun DetailScreen(
 
                             DropdownMenu(
                                 expanded = menuExpanded,
-                                onDismissRequest = { menuExpanded = false },
-                                modifier = Modifier.background(MaterialTheme.colorScheme.surface)
+                                onDismissRequest = { setMenuExpanded(false) },
+                                shape = RoundedCornerShape(
+                                    dimensionResource(id = R.dimen.corner_menu_sheet)
+                                )
                             ) {
                                 DropdownMenuItem(
                                     text = { Text("Session Info") },
                                     onClick = {
                                         HapticHelper.trigger(context, HapticHelper.Type.LIGHT)
-                                        menuExpanded = false
+                                        setMenuExpanded(false)
                                         setShowInfoDialog(true)
                                     },
                                     leadingIcon = {
@@ -481,19 +459,41 @@ fun DetailScreen(
                                         },
                                         onClick = {
                                             HapticHelper.trigger(context, HapticHelper.Type.ERROR)
-                                            menuExpanded = false
-                                            isRemoving = true
-                                            actionHandler.onRemoveUser(
-                                                sessionId, userId, user.name
-                                            ) {
-                                                onBackClick()
-                                            }
+                                            setMenuExpanded(false)
+                                            isNavigatingOut = true
+                                            viewModel.removeUser(userId, user.name)
+                                            onBackClick()
                                         },
                                         leadingIcon = {
                                             Icon(
                                                 Icons.Default.PersonRemove,
                                                 contentDescription = null,
                                                 tint = MaterialTheme.colorScheme.error
+                                            )
+                                        }
+                                    )
+                                }
+                                val hasArrived = user.hasArrived
+                                val isArrivalTrackingEnabled =
+                                    uiState.sessionData?.isArrivalTrackingEnabled == true
+
+                                if (uiState.isCurrentUserAdmin && isArrivalTrackingEnabled) {
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                if (hasArrived) "Undo reached" else "Reached dest",
+                                                color = if (hasArrived) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.secondary
+                                            )
+                                        },
+                                        onClick = {
+                                            setMenuExpanded(false)
+                                            setArrivedDialogState(!hasArrived)
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                if (hasArrived) Icons.AutoMirrored.Filled.Undo else Icons.Default.TaskAlt,
+                                                null,
+                                                tint = if (hasArrived) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.secondary
                                             )
                                         }
                                     )
@@ -815,7 +815,7 @@ fun DetailScreen(
 
                         // 2. Full Screen Button
                         FloatingActionButton(
-                            onClick = { isFullScreen = !isFullScreen },
+                            onClick = { setFullScreen(!isFullScreen) },
                             containerColor = MaterialTheme.colorScheme.surface,
                             contentColor = MaterialTheme.colorScheme.onSurface,
                             shape = CircleShape,

@@ -3,6 +3,7 @@ package com.example.multilink.ui.tracker
 import android.content.Intent
 import android.os.Build
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -68,7 +69,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -77,7 +77,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -103,9 +102,7 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.multilink.R
 import com.example.multilink.model.SessionParticipant
-import com.example.multilink.repo.RealtimeRepository
 import com.example.multilink.service.LocationService
-import com.example.multilink.ui.components.SessionActionHandler
 import com.example.multilink.ui.components.dialogs.DeleteSessionDialog
 import com.example.multilink.ui.components.dialogs.PauseSessionDialog
 import com.example.multilink.ui.components.dialogs.SessionInfoDialog
@@ -113,19 +110,19 @@ import com.example.multilink.ui.viewmodel.SessionViewModel
 import com.example.multilink.ui.viewmodel.SessionViewModelFactory
 import com.example.multilink.utils.LocationUtils
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.launch
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.PersonRemove
 import androidx.compose.material.icons.filled.TaskAlt
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import com.example.multilink.ui.viewmodel.SessionUiEvent
 import com.example.multilink.utils.HapticHelper
 import kotlinx.coroutines.delay
+import androidx.core.net.toUri
 
-enum class SeeAllSortType {
-    A_Z, Z_A, JOINED_FIRST, JOINED_LATE
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -140,37 +137,42 @@ fun SeeAllScreen(
     val viewModel: SessionViewModel = viewModel(factory = SessionViewModelFactory(sessionId))
     val uiState by viewModel.uiState.collectAsState()
 
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val repository = remember { RealtimeRepository() }
-    var lastClickTime by remember { mutableLongStateOf(0L) }
-    val actionHandler = remember { SessionActionHandler(context, repository, scope) }
+    // Observed from ViewModel directly
+    val sortedParticipants by viewModel.processedParticipants.collectAsState()
+    val searchQuery by viewModel.searchQuery.collectAsState()
+    val filterType by viewModel.filterType.collectAsState()
+    val sortType by viewModel.sortType.collectAsState()
 
+    val context = LocalContext.current
+    var lastClickTime by remember { mutableLongStateOf(0L) }
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    DisposableEffect(lifecycleOwner, sessionId) {
-        var isWatching = false
+    // Observe UI Events (Toasts, Navigation)
+    LaunchedEffect(Unit) {
+        viewModel.uiEvents.collectLatest { event ->
+            when (event) {
+                is SessionUiEvent.ShowToast -> Toast.makeText(
+                    context, event.message, Toast.LENGTH_SHORT
+                )
+                    .show()
+
+                is SessionUiEvent.NavigateBack -> onBackClick()
+                else -> {}
+            }
+        }
+    }
+
+    // Clean Lifecycle Observer
+    DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_START) {
-                if (!isWatching) {
-                    repository.incrementSessionWatchers(sessionId)
-                    isWatching = true
-                }
-            } else if (event == Lifecycle.Event.ON_STOP) {
-                if (isWatching) {
-                    repository.decrementSessionWatchers(sessionId)
-                    isWatching = false
-                }
+            when (event) {
+                Lifecycle.Event.ON_START -> viewModel.setSessionWatching(true)
+                Lifecycle.Event.ON_STOP -> viewModel.setSessionWatching(false)
+                else -> {}
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-            if (isWatching) {
-                repository.decrementSessionWatchers(sessionId)
-                isWatching = false
-            }
-        }
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     val (showMenu, setShowMenu) = remember { mutableStateOf(false) }
@@ -179,45 +181,12 @@ fun SeeAllScreen(
     val (showDeleteDialog, setShowDeleteDialog) = remember { mutableStateOf(false) }
     val (showPauseDialog, setShowPauseDialog) = remember { mutableStateOf(false) }
     val (showInfoDialog, setShowInfoDialog) = remember { mutableStateOf(false) }
+    val (isSearchExpanded, setSearchExpanded) = rememberSaveable { mutableStateOf(false) }
 
-    var isSearchExpanded by rememberSaveable { mutableStateOf(false) }
-    var searchQuery by rememberSaveable { mutableStateOf("") }
-
-    var currentSessionStatus by remember { mutableStateOf("Live") }
-    LaunchedEffect(sessionId) {
-        repository.getSessionDetails(sessionId)
-            .collectLatest { data ->
-                currentSessionStatus = data["status"] as? String ?: "Live"
-            }
+    BackHandler(enabled = isSearchExpanded) {
+        setSearchExpanded(false)
+        viewModel.updateSearchQuery("")
     }
-
-    var currentUserFilter by remember { mutableStateOf("All") }
-    var currentSortType by remember { mutableStateOf(SeeAllSortType.JOINED_FIRST) }
-
-    val sortedParticipants =
-        remember(uiState.participants, currentSortType, currentUserFilter, searchQuery) {
-            // 1. First, apply search query filter
-            val searchFiltered = if (searchQuery.isNotBlank()) {
-                uiState.participants.filter { it.name.contains(searchQuery, ignoreCase = true) }
-            } else {
-                uiState.participants
-            }
-
-            // 2. Then apply the category filter to the searched list
-            val filteredList = when (currentUserFilter) {
-                "Active" -> searchFiltered.filter { it.status != "Paused" }
-                "Paused" -> searchFiltered.filter { it.status == "Paused" }
-                else -> searchFiltered
-            }
-
-            // 3. Finally apply sorting
-            when (currentSortType) {
-                SeeAllSortType.A_Z -> filteredList.sortedBy { it.name.lowercase() }
-                SeeAllSortType.Z_A -> filteredList.sortedByDescending { it.name.lowercase() }
-                SeeAllSortType.JOINED_FIRST -> filteredList
-                SeeAllSortType.JOINED_LATE -> filteredList.reversed()
-            }
-        }
 
     fun debounceClick(action: () -> Unit) {
         val now = System.currentTimeMillis()
@@ -227,9 +196,8 @@ fun SeeAllScreen(
         }
     }
 
-    // --- NAVIGATION LOGIC ---
+    // --- NAVIGATION GUARDS ---
     var isNavigatingOut by remember { mutableStateOf(false) }
-
     val msgSessionEnded = stringResource(R.string.msg_session_ended_host)
     val msgRemoved = stringResource(R.string.msg_removed_from_session)
 
@@ -237,26 +205,20 @@ fun SeeAllScreen(
         uiState.isSessionActive, uiState.isRemoved, uiState.isLoading, uiState.sessionData?.status
     ) {
         if (uiState.isLoading || isNavigatingOut) return@LaunchedEffect
-
         val isPaused = uiState.sessionData?.status == "Paused"
-        val isAdmin = uiState.isCurrentUserAdmin
 
         if (!uiState.isSessionActive) {
             isNavigatingOut = true
-            Toast.makeText(
-                context, msgSessionEnded, Toast.LENGTH_LONG
-            )
+            Toast.makeText(context, msgSessionEnded, Toast.LENGTH_LONG)
                 .show()
             onSessionEnded()
         } else if (uiState.isRemoved) {
             delay(100)
             isNavigatingOut = true
-            Toast.makeText(
-                context, msgRemoved, Toast.LENGTH_LONG
-            )
+            Toast.makeText(context, msgRemoved, Toast.LENGTH_LONG)
                 .show()
             onSessionEnded()
-        } else if (isPaused && !isAdmin) {
+        } else if (isPaused && !uiState.isCurrentUserAdmin) {
             isNavigatingOut = true
             Toast.makeText(context, "Session paused by Host", Toast.LENGTH_LONG)
                 .show()
@@ -266,40 +228,26 @@ fun SeeAllScreen(
 
     if (showDeleteDialog) {
         DeleteSessionDialog(
-            onConfirm = {
-                setShowDeleteDialog(false)
-                scope.launch { repository.stopSession(sessionId) }
-            },
+            onConfirm = { setShowDeleteDialog(false); viewModel.deleteSession() },
             onDismiss = { setShowDeleteDialog(false) }
         )
     }
 
     if (showPauseDialog) {
-        val isPaused = currentSessionStatus == "Paused"
+        val isPaused = uiState.sessionData?.status == "Paused"
         PauseSessionDialog(
             isPaused = isPaused,
-            onConfirm = {
-                setShowPauseDialog(false)
-                scope.launch { repository.updateSessionStatus(sessionId, !isPaused) }
-
-                val message = if (!isPaused) "Session is paused" else "Session is resumed"
-                Toast.makeText(context, message, Toast.LENGTH_SHORT)
-                    .show()
-            },
+            onConfirm = { setShowPauseDialog(false); viewModel.toggleSessionPause(isPaused) },
             onDismiss = { setShowPauseDialog(false) }
         )
     }
 
     if (showInfoDialog && uiState.sessionData != null) {
-        SessionInfoDialog(
-            session = uiState.sessionData!!,
-            onDismiss = { setShowInfoDialog(false) }
-        )
+        SessionInfoDialog(session = uiState.sessionData!!, onDismiss = { setShowInfoDialog(false) })
     }
 
     Scaffold(
         topBar = {
-            // ⭐ ADDED: Focus Requester and Keyboard Controller for auto-opening keyboard
             val focusRequester = remember { FocusRequester() }
             val keyboardController = LocalSoftwareKeyboardController.current
 
@@ -315,18 +263,20 @@ fun SeeAllScreen(
                                         (shrinkHorizontally(
                                             shrinkTowards = Alignment.End
                                         ) + fadeOut(tween(300)))
-                            },
-                            label = "SearchBarAnimation"
+                            }, label = "SearchBarAnimation"
                         ) { expanded ->
                             if (expanded) {
                                 LaunchedEffect(Unit) {
                                     focusRequester.requestFocus()
                                     keyboardController?.show()
                                 }
-
                                 TextField(
                                     value = searchQuery,
-                                    onValueChange = { searchQuery = it },
+                                    onValueChange = {
+                                        viewModel.updateSearchQuery(
+                                            it
+                                        )
+                                    }, // <-- Updated
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .focusRequester(focusRequester),
@@ -337,21 +287,17 @@ fun SeeAllScreen(
                                         )
                                     },
                                     singleLine = true,
-                                    textStyle = MaterialTheme.typography.bodyLarge.copy(
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    ),
                                     trailingIcon = {
                                         if (searchQuery.isNotEmpty()) {
                                             IconButton(onClick = {
                                                 HapticHelper.trigger(
                                                     context, HapticHelper.Type.LIGHT
                                                 )
-                                                searchQuery = ""
+                                                viewModel.updateSearchQuery("")
                                             }) {
                                                 Icon(
                                                     Icons.Default.Close,
-                                                    contentDescription = "Clear Search",
-                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    contentDescription = "Clear Search"
                                                 )
                                             }
                                         }
@@ -370,9 +316,7 @@ fun SeeAllScreen(
                                     style = MaterialTheme.typography.titleLarge.copy(
                                         fontWeight = FontWeight.Bold
                                     ),
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
@@ -381,111 +325,40 @@ fun SeeAllScreen(
                         IconButton(onClick = {
                             HapticHelper.trigger(context, HapticHelper.Type.LIGHT)
                             if (isSearchExpanded) {
-                                isSearchExpanded = false
-                                searchQuery = ""
+                                setSearchExpanded(false)
+                                viewModel.updateSearchQuery("")
                                 keyboardController?.hide()
                             } else {
                                 onBackClick()
                             }
                         }) {
                             Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBackIos,
-                                contentDescription = stringResource(R.string.cd_back_button),
-                                tint = MaterialTheme.colorScheme.onSurface
+                                Icons.AutoMirrored.Filled.ArrowBackIos, contentDescription = "Back"
                             )
                         }
                     },
                     actions = {
                         if (!isSearchExpanded) {
-                            //  Search Button
                             IconButton(onClick = {
                                 HapticHelper.trigger(context, HapticHelper.Type.LIGHT)
-                                isSearchExpanded = true
-                            }) {
-                                Icon(
-                                    Icons.Default.Search, "Search",
-                                    tint = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
+                                setSearchExpanded(true)
+                            }) { Icon(Icons.Default.Search, "Search") }
 
-                            // Existing More Options Menu Button
                             Box {
-                                IconButton(
-                                    onClick = {
-                                        HapticHelper.trigger(context, HapticHelper.Type.LIGHT)
-                                        setShowMenu(true)
-                                        setShowSortOptions(false)
-                                        setShowFilterOptions(false)
-                                    }
-                                ) {
-                                    Icon(
-                                        Icons.Default.MoreVert, stringResource(R.string.cd_menu),
-                                        tint = MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
+                                IconButton(onClick = {
+                                    HapticHelper.trigger(context, HapticHelper.Type.LIGHT)
+                                    setShowMenu(true); setShowSortOptions(
+                                    false
+                                ); setShowFilterOptions(false)
+                                }) { Icon(Icons.Default.MoreVert, "Menu") }
 
                                 DropdownMenu(
-                                    expanded = showMenu,
-                                    onDismissRequest = { setShowMenu(false) },
+                                    expanded = showMenu, onDismissRequest = { setShowMenu(false) },
                                     shape = RoundedCornerShape(
                                         dimensionResource(id = R.dimen.corner_menu_sheet)
-                                    ),
-                                    offset = DpOffset(
-                                        x = -dimensionResource(R.dimen.padding_medium), y = 0.dp
                                     )
                                 ) {
                                     if (showSortOptions) {
-                                        DropdownMenuItem(
-                                            text = {
-                                                Text(
-                                                    stringResource(R.string.cd_back_button),
-                                                    color = MaterialTheme.colorScheme.secondary
-                                                )
-                                            },
-                                            leadingIcon = {
-                                                Icon(
-                                                    Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                                                    null,
-                                                    tint = MaterialTheme.colorScheme.secondary
-                                                )
-                                            },
-                                            onClick = { setShowSortOptions(false) }
-                                        )
-                                        HorizontalDivider()
-
-                                        MenuRadioItem(
-                                            stringResource(R.string.sort_az),
-                                            currentSortType == SeeAllSortType.A_Z
-                                        ) {
-                                            currentSortType = SeeAllSortType.A_Z; setShowMenu(
-                                            false
-                                        )
-                                        }
-                                        MenuRadioItem(
-                                            stringResource(R.string.sort_za),
-                                            currentSortType == SeeAllSortType.Z_A
-                                        ) {
-                                            currentSortType = SeeAllSortType.Z_A; setShowMenu(
-                                            false
-                                        )
-                                        }
-                                        MenuRadioItem(
-                                            stringResource(R.string.sort_joined_first),
-                                            currentSortType == SeeAllSortType.JOINED_FIRST
-                                        ) {
-                                            currentSortType =
-                                                SeeAllSortType.JOINED_FIRST; setShowMenu(false)
-                                        }
-                                        MenuRadioItem(
-                                            stringResource(R.string.sort_joined_late),
-                                            currentSortType == SeeAllSortType.JOINED_LATE
-                                        ) {
-                                            currentSortType =
-                                                SeeAllSortType.JOINED_LATE; setShowMenu(false)
-                                        }
-
-                                    } else if (showFilterOptions) {
-                                        //Sub-Menu for Filter
                                         DropdownMenuItem(
                                             text = {
                                                 Text(
@@ -496,37 +369,74 @@ fun SeeAllScreen(
                                             leadingIcon = {
                                                 Icon(
                                                     Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                                                    null,
-                                                    tint = MaterialTheme.colorScheme.secondary
+                                                    null, tint = MaterialTheme.colorScheme.secondary
+                                                )
+                                            },
+                                            onClick = { setShowSortOptions(false) }
+                                        )
+                                        HorizontalDivider()
+                                        MenuRadioItem(
+                                            "Name: A - Z", sortType == "A_Z"
+                                        ) { viewModel.updateSortType("A_Z"); setShowMenu(false) }
+                                        MenuRadioItem(
+                                            "Name: Z - A", sortType == "Z_A"
+                                        ) { viewModel.updateSortType("Z_A"); setShowMenu(false) }
+                                        MenuRadioItem(
+                                            "Joined First", sortType == "JOINED_FIRST"
+                                        ) {
+                                            viewModel.updateSortType("JOINED_FIRST"); setShowMenu(
+                                            false
+                                        )
+                                        }
+                                        MenuRadioItem(
+                                            "Joined Late", sortType == "JOINED_LATE"
+                                        ) {
+                                            viewModel.updateSortType("JOINED_LATE"); setShowMenu(
+                                            false
+                                        )
+                                        }
+                                    } else if (showFilterOptions) {
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    "Back",
+                                                    color = MaterialTheme.colorScheme.secondary
+                                                )
+                                            },
+                                            leadingIcon = {
+                                                Icon(
+                                                    Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                                                    null, tint = MaterialTheme.colorScheme.secondary
                                                 )
                                             },
                                             onClick = { setShowFilterOptions(false) }
                                         )
                                         HorizontalDivider()
-
                                         MenuRadioItem(
-                                            "Show All Users", currentUserFilter == "All"
-                                        ) { currentUserFilter = "All"; setShowMenu(false) }
+                                            "Show All Users", filterType == "All"
+                                        ) { viewModel.updateFilterType("All"); setShowMenu(false) }
                                         MenuRadioItem(
-                                            "Show Active", currentUserFilter == "Active"
-                                        ) { currentUserFilter = "Active"; setShowMenu(false) }
-                                        MenuRadioItem(
-                                            "Show Paused", currentUserFilter == "Paused"
-                                        ) { currentUserFilter = "Paused"; setShowMenu(false) }
-
-                                    } else {
-                                        // Main Menu
-                                        MenuActionItem(
-                                            text = stringResource(R.string.menu_session_info),
-                                            icon = Icons.Default.Info,
-                                            onClick = {
-                                                setShowMenu(false); setShowInfoDialog(
-                                                true
-                                            )
-                                            }
+                                            "Show Active", filterType == "Active"
+                                        ) {
+                                            viewModel.updateFilterType("Active"); setShowMenu(
+                                            false
                                         )
-
-                                        // Filter By Dropdown Item
+                                        }
+                                        MenuRadioItem(
+                                            "Show Paused", filterType == "Paused"
+                                        ) {
+                                            viewModel.updateFilterType("Paused"); setShowMenu(
+                                            false
+                                        )
+                                        }
+                                    } else {
+                                        MenuActionItem(
+                                            text = "Session Info", icon = Icons.Default.Info,
+                                            onClick = {
+                                                setShowMenu(
+                                                    false
+                                                ); setShowInfoDialog(true)
+                                            })
                                         DropdownMenuItem(
                                             text = { Text("Filter By") },
                                             trailingIcon = {
@@ -535,25 +445,11 @@ fun SeeAllScreen(
                                                     null
                                                 )
                                             },
-                                            leadingIcon = {
-                                                Icon(
-                                                    Icons.Default.FilterList, null,
-                                                    Modifier.size(
-                                                        dimensionResource(R.dimen.icon_small)
-                                                    )
-                                                )
-                                            },
-                                            contentPadding = PaddingValues(
-                                                horizontal = dimensionResource(
-                                                    R.dimen.padding_medium
-                                                ),
-                                                vertical = 0.dp
-                                            ),
+                                            leadingIcon = { Icon(Icons.Default.FilterList, null) },
                                             onClick = { setShowFilterOptions(true) }
                                         )
-
                                         DropdownMenuItem(
-                                            text = { Text(stringResource(R.string.menu_sort_by)) },
+                                            text = { Text("Sort By") },
                                             trailingIcon = {
                                                 Icon(
                                                     Icons.AutoMirrored.Filled.KeyboardArrowRight,
@@ -562,29 +458,17 @@ fun SeeAllScreen(
                                             },
                                             leadingIcon = {
                                                 Icon(
-                                                    Icons.AutoMirrored.Filled.Sort, null,
-                                                    Modifier.size(
-                                                        dimensionResource(R.dimen.icon_small)
-                                                    )
+                                                    Icons.AutoMirrored.Filled.Sort, null
                                                 )
                                             },
-                                            contentPadding = PaddingValues(
-                                                horizontal = dimensionResource(
-                                                    R.dimen.padding_medium
-                                                ),
-                                                vertical = 0.dp
-                                            ),
                                             onClick = { setShowSortOptions(true) }
                                         )
 
                                         if (uiState.isCurrentUserAdmin) {
                                             HorizontalDivider()
-
-                                            val isPaused = currentSessionStatus == "Paused"
+                                            val isPaused = uiState.sessionData?.status == "Paused"
                                             MenuActionItem(
-                                                text = if (isPaused) stringResource(
-                                                    R.string.menu_resume_session
-                                                ) else stringResource(R.string.menu_pause_session),
+                                                text = if (isPaused) "Resume Session" else "Pause Session",
                                                 icon = if (isPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
                                                 onClick = {
                                                     setShowMenu(false); setShowPauseDialog(
@@ -592,9 +476,8 @@ fun SeeAllScreen(
                                                 )
                                                 }
                                             )
-
                                             MenuActionItem(
-                                                text = stringResource(R.string.menu_delete_session),
+                                                text = "Delete Session",
                                                 icon = Icons.Default.Delete,
                                                 iconColor = MaterialTheme.colorScheme.error,
                                                 textColor = MaterialTheme.colorScheme.error,
@@ -609,14 +492,10 @@ fun SeeAllScreen(
                                 }
                             }
                         }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surface
-                    )
+                    }
                 )
                 HorizontalDivider(
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    thickness = dimensionResource(R.dimen.divider_thickness_thick)
+                    color = MaterialTheme.colorScheme.surfaceVariant, thickness = 1.5.dp
                 )
             }
         },
@@ -629,11 +508,11 @@ fun SeeAllScreen(
                             action = LocationService.ACTION_START
                             putExtra(LocationService.EXTRA_SESSION_ID, sessionId)
                         }
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            context.startForegroundService(serviceIntent)
-                        } else {
-                            context.startService(serviceIntent)
-                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(
+                            serviceIntent
+                        )
+                        else context.startService(serviceIntent)
+
                         onTrackAllClick(sessionId)
                     }
                 }
@@ -648,55 +527,54 @@ fun SeeAllScreen(
         ) {
             LazyVerticalGrid(
                 columns = GridCells.Fixed(2),
-                contentPadding = PaddingValues(
-                    start = dimensionResource(R.dimen.padding_medium),
-                    end = dimensionResource(R.dimen.padding_medium),
-                    top = dimensionResource(R.dimen.padding_standard),
-                    bottom = dimensionResource(R.dimen.padding_list_bottom)
-                ),
-                horizontalArrangement = Arrangement.spacedBy(
-                    dimensionResource(R.dimen.grid_spacing)
-                ),
-                verticalArrangement = Arrangement.spacedBy(dimensionResource(R.dimen.grid_spacing)),
+                contentPadding = PaddingValues(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
-                items(sortedParticipants, key = { it.id }) { user ->
-                    var userPhone by rememberSaveable { mutableStateOf("") }
-                    var userPhoto by rememberSaveable { mutableStateOf<String?>(null) }
-
-                    LaunchedEffect(user.id) {
-                        val profile = repository.getGlobalUserProfile(user.id)
-                        if (profile != null) {
-                            userPhone = profile["phone"] ?: ""
-                            userPhoto = profile["photoUrl"]?.takeIf { it.isNotEmpty() }
-                        }
-                    }
+                // UI Model handles passing the specific profile data to the Grid Card now
+                items(sortedParticipants, key = { it.participant.id }) { uiModel ->
                     UserGridCard(
-                        user = user,
-                        phoneNumber = userPhone,
-                        photoUrl = userPhoto,
-                        isCardUserAdmin = (user.id == uiState.hostId),
+                        user = uiModel.participant,
+                        phoneNumber = uiModel.phoneNumber,
+                        photoUrl = uiModel.photoUrl,
+                        isCardUserAdmin = (uiModel.participant.id == uiState.hostId),
                         isViewerAdmin = uiState.isCurrentUserAdmin,
                         destLat = uiState.endLat,
                         destLng = uiState.endLng,
                         isArrivalTrackingEnabled = uiState.sessionData?.isArrivalTrackingEnabled == true,
-                        onMarkArrivedClick = {
-                            scope.launch {
-                                repository.markUserAsArrived(
-                                    sessionId, user.id
+                        onToggleArrivedClick = {
+                            viewModel.toggleUserArrived(
+                                uiModel.participant.id, !uiModel.participant.hasArrived
+                            )
+                        },
+                        onClick = { debounceClick { onUserClick(uiModel.participant.id) } },
+                        onCallClick = {
+                            if (uiModel.phoneNumber.isNotEmpty()) {
+                                val intent = Intent(
+                                    Intent.ACTION_DIAL,
+                                    "tel:${uiModel.phoneNumber}".toUri()
                                 )
+                                context.startActivity(intent)
+                            } else {
+                                Toast.makeText(
+                                    context, "No phone number available", Toast.LENGTH_SHORT
+                                )
+                                    .show()
                             }
                         },
-                        onClick = { debounceClick { onUserClick(user.id) } },
-                        onCallClick = { actionHandler.onCall(userPhone) },
                         onRemoveClick = {
-                            actionHandler.onRemoveUser(sessionId, user.id, user.name)
+                            viewModel.removeUser(
+                                uiModel.participant.id, uiModel.participant.name
+                            )
                         },
                         onTogglePauseClick = {
-                            actionHandler.onToggleUserPause(
-                                sessionId, user.id, user.status, user.name
+                            viewModel.toggleUserPause(
+                                uiModel.participant.id, uiModel.participant.status,
+                                uiModel.participant.name
                             )
                         }
+
                     )
                 }
             }
@@ -822,13 +700,13 @@ fun UserGridCard(
     destLat: Double,
     destLng: Double,
     isArrivalTrackingEnabled: Boolean,
-    onMarkArrivedClick: () -> Unit,
+    onToggleArrivedClick: () -> Unit,
     onClick: () -> Unit,
     onCallClick: () -> Unit,
     onRemoveClick: () -> Unit,
     onTogglePauseClick: () -> Unit
 ) {
-    var expanded by remember { mutableStateOf(false) }
+    val (expanded, setExpanded) = remember { mutableStateOf(false) }
 
     val distanceString = remember(user.lat, user.lng, destLat, destLng) {
         LocationUtils.calculateDistance(user.lat, user.lng, destLat, destLng)
@@ -938,7 +816,7 @@ fun UserGridCard(
 
                 Box {
                     IconButton(
-                        onClick = { expanded = true },
+                        onClick = { setExpanded(true) },
                         modifier = Modifier.size(dimensionResource(R.dimen.icon_inside_box))
                     ) {
                         Icon(
@@ -949,7 +827,7 @@ fun UserGridCard(
 
                     DropdownMenu(
                         expanded = expanded,
-                        onDismissRequest = { expanded = false },
+                        onDismissRequest = { setExpanded(false) },
                         shape = RoundedCornerShape(
                             dimensionResource(id = R.dimen.corner_menu_sheet)
                         ),
@@ -969,29 +847,30 @@ fun UserGridCard(
                                     )
                                 )
                             },
-                            onClick = { expanded = false; onCallClick() },
+                            onClick = { setExpanded(false); onCallClick() },
                             contentPadding = PaddingValues(
                                 horizontal = dimensionResource(R.dimen.padding_medium),
                                 vertical = 0.dp
                             )
                         )
 
-                        if (isViewerAdmin && isArrivalTrackingEnabled && !hasArrived) {
+                        if (isViewerAdmin && isArrivalTrackingEnabled) {
                             DropdownMenuItem(
                                 text = {
                                     Text(
-                                        "Mark as Arrived", fontSize = 14.sp,
-                                        color = Color(0xFF4CAF50)
+                                        if (hasArrived) "Undo reached" else "Reached dest",
+                                        fontSize = 14.sp,
+                                        color = if (hasArrived) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.secondary
                                     )
                                 },
                                 leadingIcon = {
                                     Icon(
-                                        Icons.Default.TaskAlt, null, Modifier.size(
-                                            dimensionResource(R.dimen.icon_small)
-                                        ), tint = Color(0xFF4CAF50)
+                                        if (hasArrived) Icons.AutoMirrored.Filled.Undo else Icons.Default.TaskAlt,
+                                        null, Modifier.size(dimensionResource(R.dimen.icon_small)),
+                                        tint = if (hasArrived) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.secondary
                                     )
                                 },
-                                onClick = { expanded = false; onMarkArrivedClick() },
+                                onClick = { setExpanded(false); onToggleArrivedClick() },
                                 contentPadding = PaddingValues(
                                     horizontal = dimensionResource(R.dimen.padding_medium),
                                     vertical = 0.dp
@@ -1014,7 +893,7 @@ fun UserGridCard(
                                         Modifier.size(dimensionResource(R.dimen.icon_small)),
                                     )
                                 },
-                                onClick = { expanded = false; onTogglePauseClick() },
+                                onClick = { setExpanded(false); onTogglePauseClick() },
                                 contentPadding = PaddingValues(
                                     horizontal = dimensionResource(R.dimen.padding_medium),
                                     vertical = 0.dp
@@ -1033,12 +912,12 @@ fun UserGridCard(
                                 },
                                 leadingIcon = {
                                     Icon(
-                                        Icons.Default.Delete, null,
+                                        Icons.Default.PersonRemove, null,
                                         Modifier.size(dimensionResource(R.dimen.icon_small)),
                                         tint = MaterialTheme.colorScheme.error
                                     )
                                 },
-                                onClick = { expanded = false; onRemoveClick() },
+                                onClick = { setExpanded(false); onRemoveClick() },
                                 contentPadding = PaddingValues(
                                     horizontal = dimensionResource(R.dimen.padding_medium),
                                     vertical = 0.dp

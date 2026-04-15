@@ -1,7 +1,6 @@
 package com.example.multilink.ui.components.location
 
 import android.Manifest
-import android.R.attr.enabled
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -50,11 +49,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -66,14 +65,15 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import com.example.multilink.BuildConfig
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.multilink.R
-import com.example.multilink.model.SearchResult
+import com.example.multilink.ui.viewmodel.LocationSearchViewModel
 import com.google.android.gms.location.LocationServices
 import com.mapbox.bindgen.Value
 import com.mapbox.geojson.Feature
 import com.mapbox.geojson.Point
 import com.mapbox.maps.CameraOptions
+import com.mapbox.maps.MapboxExperimental
 import com.mapbox.maps.Style
 import com.mapbox.maps.extension.compose.MapEffect
 import com.mapbox.maps.extension.compose.MapboxMap
@@ -89,34 +89,31 @@ import com.mapbox.maps.plugin.locationcomponent.location
 import com.mapbox.maps.plugin.scalebar.scalebar
 import com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateOptions
 import com.mapbox.maps.plugin.viewport.viewport
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import org.json.JSONObject
-import java.net.URL
-import java.net.URLEncoder
-import java.util.UUID
+import java.util.Locale
 
+data class LocationDialogData(
+    val point: Point,
+    val coordinateString: String,
+    val defaultName: String
+)
+
+
+@OptIn(MapboxExperimental::class)
 @Composable
 fun LocationPicker(
     onLocationSelected: (String, Point) -> Unit,
-    onCancel: () -> Unit
+    onCancel: () -> Unit,
+    viewModel: LocationSearchViewModel = viewModel()
 ) {
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
-    val scope = rememberCoroutineScope()
-    val sessionToken = remember {
-        UUID.randomUUID()
-            .toString()
-    }
     val isDarkTheme = isSystemInDarkTheme()
 
     // 1. Location Client
     val fusedLocationClient = remember {
         LocationServices.getFusedLocationProviderClient(context)
     }
-    val token = BuildConfig.MAPBOX_ACCESS_TOKEN
+
 
     // Map State
     val mapViewportState = rememberMapViewportState {
@@ -127,26 +124,18 @@ fun LocationPicker(
         }
     }
 
-    // Loading & UI State
-    var isMapLoading by remember { mutableStateOf(true) }
-    var searchQuery by rememberSaveable { mutableStateOf("") }
-    var searchResults by remember { mutableStateOf<List<SearchResult>>(emptyList()) }
-    var isSearching by remember { mutableStateOf(false) }
-    var showSearchResults by rememberSaveable { mutableStateOf(true) }
-    var forceSearchTrigger by remember { mutableIntStateOf(0) }
+    val searchQuery by viewModel.searchQuery.collectAsState()
+    val searchResults by viewModel.searchResults.collectAsState()
+    val isSearching by viewModel.isSearching.collectAsState()
+    val showSearchResults by viewModel.showSearchResults.collectAsState()
+    val selectedPlace by viewModel.selectedPlace.collectAsState()
+    val moveToPlaceTrigger by viewModel.moveToPlaceTrigger.collectAsState()
 
-    // Triggers
+    var isMapLoading by remember { mutableStateOf(true) }
     var recenterTrigger by remember { mutableIntStateOf(0) }
-    var moveToPlaceTrigger by remember { mutableStateOf<Point?>(null) }
 
     // Dialog State
-    var showNameDialog by remember { mutableStateOf(false) }
-    var defaultNameForDialog by remember { mutableStateOf("") }
-    var selectedCoordinateString by remember { mutableStateOf("") }
-    var selectedPlace by remember { mutableStateOf<SearchResult?>(null) }
-
-    // --- FIX: State to hold the point when Dialog opens ---
-    var capturedPoint by remember { mutableStateOf<Point?>(null) }
+    var activeDialogData by remember { mutableStateOf<LocationDialogData?>(null) }
 
     // Permissions
     var hasLocationPermission by rememberSaveable {
@@ -193,43 +182,11 @@ fun LocationPicker(
         }
     }
 
-    // Search Logic
-    LaunchedEffect(searchQuery, forceSearchTrigger) {
-        if (searchQuery.isBlank()) {
-            searchResults = emptyList(); return@LaunchedEffect
-        }
-        if (forceSearchTrigger == 0) delay(500)
-
-        isSearching = true
-        try {
-            val center = mapViewportState.cameraState?.center
-            val proximity = if (center != null) "${center.longitude()},${center.latitude()}" else ""
-            val encodedQuery = URLEncoder.encode(searchQuery, "UTF-8")
-            val url =
-                "https://api.mapbox.com/search/searchbox/v1/suggest?q=$encodedQuery&access_token=$token&session_token=$sessionToken&proximity=$proximity&language=en&limit=5&types=poi,address,place"
-
-            val results = withContext(Dispatchers.IO) {
-                val json = URL(url).readText()
-                val suggestions = JSONObject(json).getJSONArray("suggestions")
-                val list = mutableListOf<SearchResult>()
-                for (i in 0 until suggestions.length()) {
-                    val item = suggestions.getJSONObject(i)
-                    val name = item.getString("name")
-                    val address =
-                        if (item.has("full_address")) item.getString("full_address") else ""
-                    val mapboxId = if (item.has("mapbox_id")) item.getString("mapbox_id") else null
-                    if (mapboxId != null) list.add(
-                        SearchResult(name, address, Point.fromLngLat(0.0, 0.0), mapboxId = mapboxId)
-                    )
-                }
-                list
-            }
-            searchResults = results
-        } catch (_: Exception) {
-        } finally {
-            isSearching = false
-        }
+    fun getProximity(): String {
+        val center = mapViewportState.cameraState?.center
+        return if (center != null) "${center.longitude()},${center.latitude()}" else ""
     }
+
 
     Scaffold(
         floatingActionButton = {
@@ -247,7 +204,7 @@ fun LocationPicker(
                             if (hasLocationPermission) {
                                 recenterTrigger++
                                 snapToUserLocation()
-                                searchQuery = ""
+                                viewModel.clearSearch()
                                 focusManager.clearFocus()
                             } else permissionLauncher.launch(
                                 Manifest.permission.ACCESS_FINE_LOCATION
@@ -264,15 +221,14 @@ fun LocationPicker(
                         onClick = {
                             val currentCenter = mapViewportState.cameraState?.center
                             if (currentCenter != null) {
-                                // 1. Save the point to state
-                                capturedPoint = currentCenter
-
-                                val lat = String.format("%.4f", currentCenter.latitude())
-                                val lng = String.format("%.4f", currentCenter.longitude())
-                                selectedCoordinateString = "$lat, $lng"
-                                defaultNameForDialog =
+                                val lat = String.format(Locale.US, "%.4f", currentCenter.latitude())
+                                val lng =
+                                    String.format(Locale.US, "%.4f", currentCenter.longitude())
+                                val defName =
                                     if (searchQuery.isNotEmpty() && selectedPlace != null) selectedPlace!!.name else ""
-                                showNameDialog = true
+
+                                activeDialogData =
+                                    LocationDialogData(currentCenter, "$lat, $lng", defName)
                             }
                         }, containerColor = MaterialTheme.colorScheme.primary
                     ) {
@@ -344,6 +300,7 @@ fun LocationPicker(
                             .zoom(18.0)
                             .build()
                         mapView.mapboxMap.setCamera(cameraOptions)
+                        viewModel.clearMoveToTrigger()
                     }
                 }
 
@@ -416,7 +373,11 @@ fun LocationPicker(
                     Spacer(modifier = Modifier.width(8.dp))
                     OutlinedTextField(
                         value = searchQuery,
-                        onValueChange = { searchQuery = it; showSearchResults = true },
+                        onValueChange = {
+                            viewModel.onSearchQueryChanged(
+                                it, getProximity()
+                            )
+                        }, // Route keystrokes to ViewModel
                         placeholder = { Text(stringResource(id = R.string.search_hint)) },
                         modifier = Modifier
                             .weight(1f)
@@ -431,20 +392,20 @@ fun LocationPicker(
                             )
                             else if (searchQuery.isNotEmpty()) Icon(
                                 Icons.Default.Close, null, Modifier.clickable {
-                                    searchQuery = ""; showSearchResults =
-                                    false; focusManager.clearFocus()
+                                    viewModel.clearSearch() // Clear via ViewModel
+                                    focusManager.clearFocus()
                                 })
                             else Icon(
                                 Icons.Default.Search, null, Modifier.clickable {
-                                    forceSearchTrigger++; showSearchResults =
-                                    true; focusManager.clearFocus()
+                                    viewModel.forceSearch(searchQuery, getProximity())
+                                    focusManager.clearFocus()
                                 })
                         },
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                         keyboardActions = KeyboardActions(
                             onSearch = {
-                                forceSearchTrigger++; showSearchResults =
-                                true; focusManager.clearFocus()
+                                viewModel.forceSearch(searchQuery, getProximity())
+                                focusManager.clearFocus()
                             })
                     )
                 }
@@ -462,35 +423,10 @@ fun LocationPicker(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clickable {
-                                            scope.launch(Dispatchers.IO) {
-                                                try {
-                                                    if (result.mapboxId != null) {
-                                                        val retrieveUrl =
-                                                            "https://api.mapbox.com/search/searchbox/v1/retrieve/${result.mapboxId}?access_token=$token&session_token=$sessionToken"
-                                                        val json = URL(retrieveUrl).readText()
-                                                        val feature =
-                                                            JSONObject(json).getJSONArray(
-                                                                "features"
-                                                            )
-                                                                .getJSONObject(0)
-                                                        val coords =
-                                                            feature.getJSONObject("geometry")
-                                                                .getJSONArray("coordinates")
-                                                        val newPoint = Point.fromLngLat(
-                                                            coords.getDouble(0), coords.getDouble(1)
-                                                        )
-                                                        withContext(Dispatchers.Main) {
-                                                            searchQuery = result.name
-                                                            selectedPlace =
-                                                                result.copy(point = newPoint)
-                                                            moveToPlaceTrigger = newPoint
-                                                            showSearchResults = false
-                                                            focusManager.clearFocus()
-                                                        }
-                                                    }
-                                                } catch (_: Exception) {
-                                                }
-                                            }
+                                            viewModel.selectResult(
+                                                result
+                                            ) //Handled in ViewModel without spawning Dispatchers.IO here
+                                            focusManager.clearFocus()
                                         }
                                         .padding(16.dp)) {
                                     Text(result.name)
@@ -504,12 +440,12 @@ fun LocationPicker(
         }
 
         // --- NAME DIALOG ---
-        if (showNameDialog) {
-            var customName by remember { mutableStateOf(defaultNameForDialog) }
+        activeDialogData?.let { data ->
+            var customName by remember { mutableStateOf(data.defaultName) }
             val isValid = customName.trim().length >= 3
 
             AlertDialog(
-                onDismissRequest = { showNameDialog = false },
+                onDismissRequest = { activeDialogData = null },
                 title = { Text("Name this location") },
                 text = {
                     Column {
@@ -520,16 +456,14 @@ fun LocationPicker(
                             placeholder = { Text("e.g. Home, Park") },
                             isError = !isValid && customName.isNotEmpty(),
                             supportingText = {
-                                if (!isValid) Text(
-                                    "Minimum 3 characters required"
-                                )
+                                if (!isValid) Text("Minimum 3 characters required")
                             },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth()
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "Coordinates: $selectedCoordinateString",
+                            text = "Coordinates: ${data.coordinateString}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -539,18 +473,15 @@ fun LocationPicker(
                     Button(
                         enabled = isValid,
                         onClick = {
-                            // --- FIX: Use the captured point ---
-                            if (capturedPoint != null) {
-                                onLocationSelected(customName, capturedPoint!!)
-                            }
-                            showNameDialog = false
+                            onLocationSelected(customName, data.point)
+                            activeDialogData = null
                         }
                     ) {
                         Text("Save & Select")
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showNameDialog = false }) { Text("Cancel") }
+                    TextButton(onClick = { activeDialogData = null }) { Text("Cancel") }
                 }
             )
         }

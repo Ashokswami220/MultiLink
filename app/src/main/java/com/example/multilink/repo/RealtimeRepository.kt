@@ -98,8 +98,12 @@ class RealtimeRepository {
             override fun doTransaction(currentData: MutableData): Transaction.Result {
                 var count = currentData.getValue(Int::class.java) ?: 0
                 count += delta
-                if (count < 0) count = 0 // Prevent negative counts
-                currentData.value = count
+
+                if (count <= 0) {
+                    currentData.value = null
+                } else {
+                    currentData.value = count
+                }
                 return Transaction.success(currentData)
             }
 
@@ -224,62 +228,16 @@ class RealtimeRepository {
                 .get()
                 .await()
             if (snapshot.exists()) {
-                val pCount = snapshot.child("users").childrenCount.toInt()
                 val title = snapshot.child("title")
                     .getValue(String::class.java) ?: "Unnamed Session"
 
-                val sessionData = SessionData(
-                    id = sessionId,
-                    title = title,
-                    hostId = snapshot.child("hostId")
-                        .getValue(String::class.java) ?: "",
-                    hostName = snapshot.child("hostName")
-                        .getValue(String::class.java) ?: "Unknown Host",
-                    fromLocation = snapshot.child("fromLocation")
-                        .getValue(String::class.java) ?: "",
-                    toLocation = snapshot.child("toLocation")
-                        .getValue(String::class.java) ?: "",
-                    startLat = snapshot.child("startLat")
-                        .getValue(Double::class.java) ?: 0.0,
-                    startLng = snapshot.child("startLng")
-                        .getValue(Double::class.java) ?: 0.0,
-                    endLat = snapshot.child("endLat")
-                        .getValue(Double::class.java) ?: 0.0,
-                    endLng = snapshot.child("endLng")
-                        .getValue(Double::class.java) ?: 0.0,
-                    createdTimestamp = snapshot.child("created")
-                        .getValue(Long::class.java) ?: 0L,
-                    durationVal = snapshot.child("durationVal")
-                        .getValue(String::class.java) ?: "2",
-                    durationUnit = snapshot.child("durationUnit")
-                        .getValue(String::class.java) ?: "Hrs",
-                    maxPeople = snapshot.child("maxPeople")
-                        .getValue(String::class.java) ?: "10",
-                    status = snapshot.child("status")
-                        .getValue(String::class.java) ?: "Ended",
-                    joinCode = snapshot.child("joinCode")
-                        .getValue(String::class.java) ?: "",
-                    isUsersVisible = snapshot.child("isUsersVisible")
-                        .getValue(Boolean::class.java) ?: true,
-                    isSharingAllowed = snapshot.child("isSharingAllowed")
-                        .getValue(Boolean::class.java) ?: true,
-                    isHostSharing = snapshot.child("isHostSharing")
-                        .getValue(Boolean::class.java) ?: true,
-                    activeUsers = pCount
-                )
-
-                try {
-                    archiveSessionForUser(targetUserId, sessionData, pCount, "Removed by Admin")
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
 
                 sendFeedItem(
                     targetUserId,
                     type = "alert",
                     title = "Removed from Session",
                     message = "You were removed from '$title' by the host.",
-                    sessionId = sessionId
+                    sessionId = ""
                 )
             }
 
@@ -562,7 +520,9 @@ class RealtimeRepository {
                         val hostId = child.child("hostId")
                             .getValue(String::class.java) ?: ""
                         val isParticipant = child.child("users")
-                            .hasChild(userId)
+                            .child(userId)
+                            .child("id")
+                            .exists()
                         var userCount = 0
                         child.child("users").children.forEach { userSnapshot ->
                             if (userSnapshot.child("id")
@@ -824,12 +784,15 @@ class RealtimeRepository {
         }
     }
 
-    //Marks user as arrived
-    suspend fun markUserAsArrived(sessionId: String, targetUserId: String) {
+    // Changed to support both Marking and Unmarking Arrived status
+    suspend fun toggleUserArrivedStatus(
+        sessionId: String, targetUserId: String, isArriving: Boolean
+    ) {
         try {
+            val status = if (isArriving) "Arrived" else "Online"
             val updates = mapOf(
-                "hasArrived" to true,
-                "status" to "Arrived",
+                "hasArrived" to isArriving,
+                "status" to status,
                 "lastUpdated" to System.currentTimeMillis()
             )
             db.child("sessions")

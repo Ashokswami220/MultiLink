@@ -3,7 +3,6 @@ package com.example.multilink.ui.tracker
 import android.Manifest
 import android.content.pm.PackageManager
 import android.content.res.Configuration
-import android.location.Location
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -41,20 +40,20 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.TaskAlt
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -62,16 +61,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -93,28 +90,28 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
-import com.example.multilink.BuildConfig
 import com.example.multilink.R
 import com.example.multilink.model.SessionParticipant
-import com.example.multilink.repo.RealtimeRepository
-import com.example.multilink.repo.RouteRepository
 import com.example.multilink.service.LocationService
 import com.example.multilink.ui.components.MapTopBar
 import com.example.multilink.ui.components.MultiLinkMap
 import com.example.multilink.ui.components.MyLocationFab
 import com.example.multilink.ui.components.SessionControlBar
 import com.example.multilink.ui.components.SessionMapContent
+import com.example.multilink.ui.components.dialogs.ArrivedToggleDialog
 import com.example.multilink.ui.components.dialogs.DeleteSessionDialog
 import com.example.multilink.ui.components.dialogs.PauseSessionDialog
 import com.example.multilink.ui.components.dialogs.SessionInfoDialog
+import com.example.multilink.ui.components.dialogs.TooFarDialog
+import com.example.multilink.ui.viewmodel.ParticipantUiModel
+import com.example.multilink.ui.viewmodel.SessionUiEvent
 import com.example.multilink.ui.viewmodel.SessionViewModel
 import com.example.multilink.ui.viewmodel.SessionViewModelFactory
 import com.example.multilink.utils.LocationUtils
-import com.google.firebase.auth.FirebaseAuth
 import com.mapbox.geojson.Point
 import com.mapbox.maps.CameraOptions
 import com.mapbox.maps.extension.compose.animation.viewport.rememberMapViewportState
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collectLatest
 
 enum class SortType {
     A_Z,
@@ -122,6 +119,7 @@ enum class SortType {
     JOINED_FIRST,
     JOINED_LATE
 }
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -135,75 +133,29 @@ fun LiveTrackingScreen(
 ) {
     val viewModel: SessionViewModel = viewModel(factory = SessionViewModelFactory(sessionId))
     val uiState by viewModel.uiState.collectAsState()
+    val realRoutePoints by viewModel.routePoints.collectAsState()
 
     val context = LocalContext.current
-    val auth = remember { FirebaseAuth.getInstance() }
-    val currentUserId = remember { auth.currentUser?.uid ?: "" }
 
-    val repository = remember { RealtimeRepository() }
-    val scope = rememberCoroutineScope()
-
-    // DIRECT DATABASE FETCH: Bypasses the ViewModel to guarantee accuracy
-    var isArrivalEnabled by remember { mutableStateOf(false) }
-    var hasArrived by remember { mutableStateOf(false) }
-
-    LaunchedEffect(sessionId) {
-        repository.getSessionDetails(sessionId)
-            .collect { data ->
-                isArrivalEnabled = data["isArrivalTrackingEnabled"] as? Boolean ?: false
-            }
-    }
-
-    LaunchedEffect(sessionId, currentUserId) {
-        if (currentUserId.isNotEmpty()) {
-            val userRef = com.google.firebase.database.FirebaseDatabase.getInstance().reference
-                .child("sessions")
-                .child(sessionId)
-                .child("users")
-                .child(currentUserId)
-                .child("hasArrived")
-            userRef.addValueEventListener(object : com.google.firebase.database.ValueEventListener {
-                override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
-                    hasArrived = snapshot.getValue(Boolean::class.java) ?: false
-                }
-
-                override fun onCancelled(error: com.google.firebase.database.DatabaseError) {}
-            })
-        }
-    }
+    // We derive these directly from the centralized UI state now, no DB calls!
+    val isArrivalEnabled = uiState.sessionData?.isArrivalTrackingEnabled ?: false
+    val currentUserData = uiState.participants.find { it.id == uiState.currentUserId }
+    val hasArrived = currentUserData?.hasArrived ?: false
+    val processedParticipants by viewModel.processedParticipants.collectAsState()
 
     val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner, sessionId) {
-        var isWatching = false
+    DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_START) {
-                // Screen is visible/foregrounded
-                if (!isWatching) {
-                    repository.incrementSessionWatchers(sessionId)
-                    isWatching = true
-                }
-            } else if (event == Lifecycle.Event.ON_STOP) {
-                // Screen is hidden/backgrounded
-                if (isWatching) {
-                    repository.decrementSessionWatchers(sessionId)
-                    isWatching = false
-                }
+            when (event) {
+                Lifecycle.Event.ON_START -> viewModel.setSessionWatching(true)
+                Lifecycle.Event.ON_STOP -> viewModel.setSessionWatching(false)
+                else -> {}
             }
         }
-
         lifecycleOwner.lifecycle.addObserver(observer)
-
-        onDispose {
-            // Safety cleanup when composable is destroyed
-            lifecycleOwner.lifecycle.removeObserver(observer)
-            if (isWatching) {
-                repository.decrementSessionWatchers(sessionId)
-                isWatching = false
-            }
-        }
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // --- ORIENTATION CHECK ---
     val configuration = LocalConfiguration.current
     val isPortrait = configuration.orientation == Configuration.ORIENTATION_PORTRAIT
 
@@ -211,21 +163,39 @@ fun LiveTrackingScreen(
     val (showDeleteDialog, setShowDeleteDialog) = remember { mutableStateOf(false) }
     val (showPauseDialog, setShowPauseDialog) = remember { mutableStateOf(false) }
     val (showInfoDialog, setShowInfoDialog) = remember { mutableStateOf(false) }
+    val (showTooFarDialog, setShowTooFarDialog) = remember { mutableStateOf(false) }
+    val (arrivedDialogState, setArrivedDialogState) = remember { mutableStateOf<Boolean?>(null) }
 
-    var showTooFarDialog by remember { mutableStateOf(false) }
-    var showArrivedConfirmDialog by remember { mutableStateOf(false) }
+    var distanceRemaining by remember { mutableIntStateOf(0) }
+
+    // --- NEW: Observe UI Events from ViewModel ---
+    LaunchedEffect(Unit) {
+        viewModel.uiEvents.collectLatest { event ->
+            when (event) {
+                is SessionUiEvent.ShowToast -> Toast.makeText(
+                    context, event.message, Toast.LENGTH_SHORT
+                )
+                    .show()
+
+                is SessionUiEvent.NavigateBack -> onBackClick()
+                is SessionUiEvent.ShowTooFarDialog -> {
+                    distanceRemaining = event.distanceMeters
+                    setShowTooFarDialog(true)
+                }
+
+                is SessionUiEvent.ShowArrivedToggleDialog -> setArrivedDialogState(event.isArriving)
+            }
+        }
+    }
 
     // --- NAVIGATION GUARDS ---
     var isNavigatingOut by remember { mutableStateOf(false) }
-
     LaunchedEffect(
         uiState.isSessionActive, uiState.isRemoved, uiState.isLoading, uiState.sessionData?.status
     ) {
         if (uiState.isLoading || isNavigatingOut) return@LaunchedEffect
 
         val isPaused = uiState.sessionData?.status == "Paused"
-        val isAdmin = uiState.isCurrentUserAdmin
-
         if (!uiState.isSessionActive) {
             isNavigatingOut = true
             Toast.makeText(context, "Session Ended", Toast.LENGTH_SHORT)
@@ -237,7 +207,7 @@ fun LiveTrackingScreen(
             Toast.makeText(context, "You were removed by the host", Toast.LENGTH_LONG)
                 .show()
             onSessionEnded()
-        } else if (isPaused && !isAdmin) {
+        } else if (isPaused && !uiState.isCurrentUserAdmin) {
             isNavigatingOut = true
             Toast.makeText(context, "Session paused by Host", Toast.LENGTH_LONG)
                 .show()
@@ -245,24 +215,11 @@ fun LiveTrackingScreen(
         }
     }
 
-    // --- MAP & ROUTE ---
-    val token = BuildConfig.MAPBOX_ACCESS_TOKEN
-    val routeRepository = remember { RouteRepository(token) }
-    var realRoutePoints by remember { mutableStateOf<List<Point>>(emptyList()) }
-
-    LaunchedEffect(uiState.startPoint, uiState.endPoint) {
-        if (uiState.startPoint != null && uiState.endPoint != null) {
-            val path = routeRepository.getRoute(uiState.startPoint!!, uiState.endPoint!!)
-            realRoutePoints = path.ifEmpty { listOf(uiState.startPoint!!, uiState.endPoint!!) }
-        }
-    }
-
     // Map Locations Logic
-    val userLocations = remember(uiState.participants) {
-        uiState.participants.mapNotNull { user ->
-            if (user.lat != 0.0 && user.lng != 0.0) {
-                Point.fromLngLat(user.lng, user.lat) to user
-            } else null
+    val userLocations = remember(processedParticipants) {
+        processedParticipants.mapNotNull { uiModel ->
+            val p = uiModel.participant
+            if (p.lat != 0.0 && p.lng != 0.0) Point.fromLngLat(p.lng, p.lat) to uiModel else null
         }
     }
 
@@ -273,35 +230,8 @@ fun LiveTrackingScreen(
         )
     }
 
-    // Distance Math for 200m Verification
-    val distToDestMeters = remember(myRealPoint, uiState.endPoint) {
-        if (myRealPoint != null && uiState.endPoint != null) {
-            val results = FloatArray(1)
-            Location.distanceBetween(
-                myRealPoint.latitude(), myRealPoint.longitude(), uiState.endPoint!!.latitude(),
-                uiState.endPoint!!.longitude(), results
-            )
-            results[0]
-        } else Float.MAX_VALUE
-    }
-
-    val handleArrivedClick = {
-        if (uiState.endPoint == null) {
-            Toast.makeText(context, "Destination not set by host.", Toast.LENGTH_SHORT)
-                .show()
-        } else if (distToDestMeters > 200f) {
-            showTooFarDialog = true
-        } else {
-            showArrivedConfirmDialog = true
-        }
-    }
-
     val mapViewportState = rememberMapViewportState {
-        setCameraOptions {
-            center(myRealPoint); zoom(13.5); pitch(
-            0.0
-        )
-        }
+        setCameraOptions { center(myRealPoint); zoom(13.5); pitch(0.0) }
     }
     var followUserLocation by remember { mutableStateOf(false) }
     var focusTarget by remember { mutableStateOf<Point?>(null) }
@@ -347,66 +277,30 @@ fun LiveTrackingScreen(
         val isPaused = uiState.sessionData?.status == "Paused"
         PauseSessionDialog(
             isPaused = isPaused,
-            onConfirm = {
-                setShowPauseDialog(false)
-                scope.launch { repository.updateSessionStatus(sessionId, !isPaused) }
-
-                val message = if (!isPaused) "Session is paused" else "Session is resumed"
-                Toast.makeText(context, message, Toast.LENGTH_SHORT)
-                    .show()
-            },
+            onConfirm = { setShowPauseDialog(false); viewModel.toggleSessionPause(isPaused) },
             onDismiss = { setShowPauseDialog(false) }
         )
     }
 
     if (showInfoDialog && uiState.sessionData != null) {
-        SessionInfoDialog(
-            session = uiState.sessionData!!,
-            onDismiss = { setShowInfoDialog(false) }
-        )
+        SessionInfoDialog(session = uiState.sessionData!!, onDismiss = { setShowInfoDialog(false) })
     }
 
     if (showTooFarDialog) {
-        AlertDialog(
-            onDismissRequest = { showTooFarDialog = false },
-            title = { Text("Too Far Away") },
-            text = {
-                Text(
-                    "You must be within 200 meters of the destination to check in. You are currently ${distToDestMeters.toInt()} meters away."
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { showTooFarDialog = false }) {
-                    Text(
-                        "Got it"
-                    )
-                }
-            }
+        TooFarDialog(
+            distanceMeters = distanceRemaining,
+            onDismiss = { setShowTooFarDialog(false) }
         )
     }
 
-    if (showArrivedConfirmDialog) {
-        AlertDialog(
-            onDismissRequest = { showArrivedConfirmDialog = false },
-            title = { Text("Mark as Arrived?") },
-            text = {
-                Text(
-                    "This will automatically pause your location tracking and notify everyone that you have reached the destination."
-                )
+    arrivedDialogState?.let { isArriving ->
+        ArrivedToggleDialog(
+            isArriving = isArriving,
+            onConfirm = {
+                setArrivedDialogState(null)
+                viewModel.toggleUserArrived(uiState.currentUserId, isArriving)
             },
-            confirmButton = {
-                Button(onClick = {
-                    showArrivedConfirmDialog = false
-                    scope.launch { repository.markUserAsArrived(sessionId, currentUserId) }
-                }) { Text("Confirm") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showArrivedConfirmDialog = false }) {
-                    Text(
-                        "Cancel"
-                    )
-                }
-            }
+            onDismiss = { setArrivedDialogState(null) }
         )
     }
 
@@ -429,42 +323,36 @@ fun LiveTrackingScreen(
                 routePoints = realRoutePoints
             ) {
                 SessionMapContent(
-                    sessionStartPoint = uiState.startPoint,
-                    startLocName = uiState.startName,
-                    destinationPoint = uiState.endPoint,
-                    endLocName = uiState.endName,
-                    userLocations = userLocations,
-                    currentUserId = currentUserId
+                    sessionStartPoint = uiState.startPoint, startLocName = uiState.startName,
+                    destinationPoint = uiState.endPoint, endLocName = uiState.endName,
+                    userLocations = userLocations.map { it.first to it.second.participant },
+                    currentUserId = uiState.currentUserId
                 )
             }
 
             Column(
                 modifier = Modifier
-                    .align(if (isPortrait) Alignment.TopCenter else Alignment.TopStart)
+                    .align(
+                        if (isPortrait) Alignment.TopCenter else Alignment.TopStart
+                    )
                     .fillMaxWidth(if (isPortrait) 1f else 0.5f)
             ) {
                 Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
                 Spacer(modifier = Modifier.height(12.dp))
 
                 MapTopBar(
-                    startName = uiState.startName,
-                    endName = uiState.endName,
-                    isViewerAdmin = uiState.isCurrentUserAdmin,
-                    isSessionAdminMode = true,
+                    startName = uiState.startName, endName = uiState.endName,
+                    isViewerAdmin = uiState.isCurrentUserAdmin, isSessionAdminMode = true,
                     sessionStatus = uiState.sessionData?.status ?: "Live",
                     onBackClick = onBackClick,
                     onStartClick = {
-                        if (uiState.startPoint != null) focusTarget =
-                            uiState.startPoint else Toast.makeText(
-                            context, "No Start Point", Toast.LENGTH_SHORT
-                        )
+                        if (uiState.startPoint != null) focusTarget = uiState.startPoint
+                        else Toast.makeText(context, "No Start Point", Toast.LENGTH_SHORT)
                             .show()
                     },
                     onEndClick = {
-                        if (uiState.endPoint != null) focusTarget =
-                            uiState.endPoint else Toast.makeText(
-                            context, "No End Point", Toast.LENGTH_SHORT
-                        )
+                        if (uiState.endPoint != null) focusTarget = uiState.endPoint
+                        else Toast.makeText(context, "No End Point", Toast.LENGTH_SHORT)
                             .show()
                     },
                     onDeleteClick = { setShowDeleteDialog(true) },
@@ -482,28 +370,13 @@ fun LiveTrackingScreen(
                     .padding(
                         start = dimensionResource(id = R.dimen.padding_standard),
                         end = dimensionResource(id = R.dimen.padding_standard),
-                        top = dimensionResource(id = R.dimen.padding_standard),
-                        bottom = 8.dp
+                        top = dimensionResource(id = R.dimen.padding_standard), bottom = 8.dp
                     )
-                    .fillMaxWidth(
-                        if (isPortrait) 1f else 0.5f
-                    ),
+                    .fillMaxWidth(if (isPortrait) 1f else 0.5f),
                 horizontalAlignment = Alignment.End
             ) {
-
-                if (isArrivalEnabled && !hasArrived) {
-                    FloatingActionButton(
-                        onClick = handleArrivedClick,
-                        containerColor = Color(0xFF4CAF50),
-                        contentColor = Color.White,
-                        shape = CircleShape
-                    ) { Icon(Icons.Default.TaskAlt, "Check In") }
-                    Spacer(modifier = Modifier.height(12.dp))
-                }
-
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
+                    modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     SessionControlBar(
@@ -514,17 +387,12 @@ fun LiveTrackingScreen(
                         },
                         onUserClick = {
                             val firstOtherUser =
-                                userLocations.firstOrNull { it.second.id != currentUserId }
-                            if (firstOtherUser != null) {
-                                focusTarget = firstOtherUser.first
-                            } else {
-                                Toast.makeText(
-                                    context,
-                                    "No other users active",
-                                    Toast.LENGTH_SHORT
-                                )
-                                    .show()
-                            }
+                                userLocations.firstOrNull { it.second.participant.id != uiState.currentUserId }
+                            if (firstOtherUser != null) focusTarget = firstOtherUser.first
+                            else Toast.makeText(
+                                context, "No other users active", Toast.LENGTH_SHORT
+                            )
+                                .show()
                         },
                         onEndClick = {
                             if (uiState.endPoint != null) focusTarget = uiState.endPoint
@@ -533,6 +401,32 @@ fun LiveTrackingScreen(
                         },
                         showUserButton = false
                     )
+
+                    if (isArrivalEnabled) {
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Button(
+                            onClick = { viewModel.attemptCheckIn(myRealPoint, !hasArrived) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (hasArrived) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.secondaryContainer,
+                                contentColor = if (hasArrived) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSecondaryContainer
+                            ),
+                            shape = CircleShape,
+                            elevation = ButtonDefaults.buttonElevation(4.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                            modifier = Modifier.height(44.dp)
+                        ) {
+                            Icon(
+                                if (hasArrived) Icons.AutoMirrored.Filled.Undo else Icons.Default.TaskAlt,
+                                null
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                if (hasArrived) "Undo reached" else "Reached dest",
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
                     Spacer(modifier = Modifier.width(12.dp))
 
                     MyLocationFab(
@@ -543,8 +437,7 @@ fun LiveTrackingScreen(
                                     .zoom(16.0)
                                     .build()
                             )
-                        }
-                    )
+                        })
                 }
 
                 if (isPortrait) {
@@ -552,8 +445,7 @@ fun LiveTrackingScreen(
                     LiveBottomSummary(
                         userLocations = userLocations.map { it.second to it.first },
                         destination = uiState.endPoint,
-                        isPortrait = true,
-                        onFocusUser = { focusTarget = it },
+                        isPortrait = true, onFocusUser = { focusTarget = it },
                         onOpenDetails = onUserDetailClick
                     )
                 }
@@ -563,17 +455,15 @@ fun LiveTrackingScreen(
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomStart)
-                        .fillMaxWidth(0.5f) // Matches Top Bar Width
+                        .fillMaxWidth(0.5f)
                         .navigationBarsPadding()
                         .padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
                 ) {
                     LiveBottomSummary(
-                        modifier = Modifier, // Internal width logic handles filling this Box
+                        modifier = Modifier,
                         userLocations = userLocations.map { it.second to it.first },
-                        destination = uiState.endPoint,
-                        isPortrait = false,
-                        onFocusUser = { focusTarget = it },
-                        onOpenDetails = onUserDetailClick
+                        destination = uiState.endPoint, isPortrait = false,
+                        onFocusUser = { focusTarget = it }, onOpenDetails = onUserDetailClick
                     )
                 }
             }
@@ -585,7 +475,7 @@ fun LiveTrackingScreen(
 @Composable
 fun LiveBottomSummary(
     modifier: Modifier = Modifier,
-    userLocations: List<Pair<SessionParticipant, Point>>,
+    userLocations: List<Pair<ParticipantUiModel, Point>>,
     destination: Point?,
     isPortrait: Boolean,
     onFocusUser: (Point) -> Unit,
@@ -602,8 +492,8 @@ fun LiveBottomSummary(
 
     val sortedUserLocations = remember(userLocations, currentSortType) {
         when (currentSortType) {
-            SortType.A_Z -> userLocations.sortedBy { it.first.name.lowercase() }
-            SortType.Z_A -> userLocations.sortedByDescending { it.first.name.lowercase() }
+            SortType.A_Z -> userLocations.sortedBy { it.first.participant.name.lowercase() }
+            SortType.Z_A -> userLocations.sortedByDescending { it.first.participant.name.lowercase() }
             SortType.JOINED_FIRST -> userLocations
             SortType.JOINED_LATE -> userLocations.reversed()
         }
@@ -848,21 +738,9 @@ fun LiveBottomSummary(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Start
                     ) {
-                        itemsIndexed(sortedUserLocations) { index, (user, point) ->
-
-                            var userPhoto by rememberSaveable(user.id) {
-                                mutableStateOf<String?>(
-                                    null
-                                )
-                            }
-                            val repository = remember { RealtimeRepository() }
-
-                            LaunchedEffect(user.id) {
-                                val profile = repository.getGlobalUserProfile(user.id)
-                                if (profile != null) {
-                                    userPhoto = profile["photoUrl"]?.takeIf { it.isNotEmpty() }
-                                }
-                            }
+                        itemsIndexed(sortedUserLocations) { index, (uiModel, point) ->
+                            val userPhoto = uiModel.photoUrl
+                            val user = uiModel.participant
 
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Column(

@@ -8,7 +8,6 @@ object MultiLinkRoutes {
     const val ABOUT = "about_screen"
     const val PROFILE = "profile_screen"
     const val LIVE_TRACKING = "live_tracking"
-    const val RESTRICTED = "restricted"
     const val COMPLETE_PROFILE = "complete_profile"
     const val RECENT_DETAIL = "recent_detail"
     const val NOTIFICATION_DETAIL = "notification_detail"

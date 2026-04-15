@@ -16,6 +16,7 @@ data class NavStep(
     val location: Point
 )
 
+
 data class RouteResult(
     val routePoints: List<Point>,
     val distanceMeters: Double,

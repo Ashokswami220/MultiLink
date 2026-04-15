@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBackIos
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.*
@@ -35,8 +36,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.multilink.BuildConfig
-import com.example.multilink.repo.RouteRepository
 import com.example.multilink.repo.RouteResult
 import com.example.multilink.service.LocationService
 import com.example.multilink.ui.components.MultiLinkMap
@@ -52,8 +51,10 @@ import kotlinx.coroutines.delay
 import java.util.Locale
 import kotlin.math.*
 import androidx.core.net.toUri
-import com.example.multilink.repo.RealtimeRepository
-import kotlinx.coroutines.launch
+import com.example.multilink.ui.components.dialogs.ArrivedToggleDialog
+import com.example.multilink.ui.components.dialogs.TooFarDialog
+import com.example.multilink.ui.viewmodel.SessionUiEvent
+import kotlinx.coroutines.flow.collectLatest
 
 object NavigationCache {
     var sessionId: String? = null
@@ -71,81 +72,106 @@ fun SoloNavigationScreen(
 
     val viewModel: SessionViewModel = viewModel(factory = SessionViewModelFactory(sessionId))
     val uiState by viewModel.uiState.collectAsState()
-    val token = BuildConfig.MAPBOX_ACCESS_TOKEN
-    val routeRepository = remember { RouteRepository(token) }
 
-    val repository = remember { RealtimeRepository() }
-    val scope = rememberCoroutineScope()
+    val vmRouteResult by viewModel.navigationRoute.collectAsState()
 
-    val currentUserId =
-        remember { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: "" }
-    var isArrivalEnabled by remember { mutableStateOf(false) }
-    var hasArrived by remember { mutableStateOf(false) }
-
-    LaunchedEffect(sessionId) {
-        repository.getSessionDetails(sessionId)
-            .collect { data ->
-                isArrivalEnabled = data["isArrivalTrackingEnabled"] as? Boolean ?: false
-            }
-    }
-
-    LaunchedEffect(sessionId, currentUserId) {
-        if (currentUserId.isNotEmpty()) {
-            val userRef = com.google.firebase.database.FirebaseDatabase.getInstance().reference
-                .child("sessions")
-                .child(sessionId)
-                .child("users")
-                .child(currentUserId)
-                .child("hasArrived")
-            userRef.addValueEventListener(object : com.google.firebase.database.ValueEventListener {
-                override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
-                    hasArrived = snapshot.getValue(Boolean::class.java) ?: false
-                }
-
-                override fun onCancelled(error: com.google.firebase.database.DatabaseError) {}
-            })
-        }
-    }
+    val isArrivalEnabled = uiState.sessionData?.isArrivalTrackingEnabled ?: false
+    val currentUserData = uiState.participants.find { it.id == uiState.currentUserId }
+    val hasArrived = currentUserData?.hasArrived ?: false
 
     var routeResult by remember {
         mutableStateOf(
             if (NavigationCache.sessionId == sessionId) NavigationCache.currentRoute else null
         )
     }
+
     val serviceLocationState by LocationService.currentLocation.collectAsState()
     var localLocationState by remember { mutableStateOf<Location?>(null) }
+    var lastKnownLoc by rememberSaveable { mutableStateOf<Pair<Double, Double>?>(null) }
+    var lastKnownBearing by rememberSaveable { mutableDoubleStateOf(0.0) }
+
+    val currentSpeed = remember(serviceLocationState, localLocationState) {
+        val loc = serviceLocationState ?: localLocationState
+        loc?.speed ?: 0f
+    }
+
+    val currentBearing = remember(serviceLocationState, localLocationState) {
+        val loc = serviceLocationState ?: localLocationState
+        loc?.bearing?.toDouble() ?: lastKnownBearing
+    }
+
+    val myRealPoint = remember(serviceLocationState, localLocationState) {
+        val loc = serviceLocationState ?: localLocationState
+        if (loc != null) {
+            lastKnownLoc = Pair(loc.longitude, loc.latitude)
+            lastKnownBearing = loc.bearing.toDouble()
+            Point.fromLngLat(loc.longitude, loc.latitude)
+        } else {
+            lastKnownLoc?.let { Point.fromLngLat(it.first, it.second) }
+        }
+    }
+
+    LaunchedEffect(myRealPoint, uiState.endPoint) {
+        val endPoint = uiState.endPoint
+        if (myRealPoint != null && endPoint != null && vmRouteResult == null) {
+            viewModel.fetchNavigationRoute(myRealPoint)
+        }
+    }
+
+    // Sync ViewModel route with local cache
+    LaunchedEffect(vmRouteResult) {
+        if (vmRouteResult != null) {
+            routeResult = vmRouteResult
+            NavigationCache.sessionId = sessionId
+            NavigationCache.currentRoute = vmRouteResult
+        }
+    }
 
     var isNavigating by rememberSaveable { mutableStateOf(true) }
     var is3DMode by rememberSaveable { mutableStateOf(true) }
     var isVoiceEnabled by rememberSaveable { mutableStateOf(true) }
 
-    // Internal interaction states (don't strictly need saving across rotation)
     var isInteractionEnabled by remember { mutableStateOf(false) }
     var hasInitialFlyToDone by remember { mutableStateOf(false) }
     var isRerouting by remember { mutableStateOf(false) }
-    var isViewMenuExpanded by remember { mutableStateOf(false) }
 
-    var showTooFarDialog by remember { mutableStateOf(false) }
-    var showArrivedConfirmDialog by remember { mutableStateOf(false) }
+    val (isViewMenuExpanded, setViewMenuExpanded) = remember { mutableStateOf(false) }
+    val (showTooFarDialog, setShowTooFarDialog) = remember { mutableStateOf(false) }
+    val (arrivedDialogState, setArrivedDialogState) = remember { mutableStateOf<Boolean?>(null) }
 
-    val handleBackPress = {
-        if (isNavigating) {
-            isNavigating = false
-        } else {
-            onBackClick()
+    var distanceRemaining by remember { mutableIntStateOf(0) }
+
+
+    LaunchedEffect(Unit) {
+        viewModel.uiEvents.collectLatest { event ->
+            when (event) {
+                is SessionUiEvent.ShowToast -> Toast.makeText(
+                    context, event.message, Toast.LENGTH_SHORT
+                )
+                    .show()
+
+                is SessionUiEvent.NavigateBack -> onBackClick()
+                is SessionUiEvent.ShowTooFarDialog -> {
+                    distanceRemaining = event.distanceMeters
+                    setShowTooFarDialog(true)
+                }
+
+                is SessionUiEvent.ShowArrivedToggleDialog -> setArrivedDialogState(event.isArriving)
+            }
         }
     }
 
-    BackHandler(enabled = true) {
-        handleBackPress()
+
+    val handleBackPress = {
+        if (isNavigating) isNavigating = false else onBackClick()
     }
+
+    BackHandler(enabled = true) { handleBackPress() }
 
     var tts by remember { mutableStateOf<TextToSpeech?>(null) }
     DisposableEffect(context) {
         val textToSpeech = TextToSpeech(context) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                tts?.language = Locale.getDefault()
-            }
+            if (status == TextToSpeech.SUCCESS) tts?.language = Locale.getDefault()
         }
         tts = textToSpeech
         onDispose { textToSpeech.shutdown() }
@@ -159,58 +185,12 @@ fun SoloNavigationScreen(
             ) == PackageManager.PERMISSION_GRANTED
         ) {
             try {
-                val fusedClient = LocationServices.getFusedLocationProviderClient(context)
-                fusedClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
+                LocationServices.getFusedLocationProviderClient(context)
+                    .getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
                     .addOnSuccessListener { loc -> localLocationState = loc }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
-        }
-    }
-
-    var lastKnownLoc by rememberSaveable { mutableStateOf<Pair<Double, Double>?>(null) }
-    var lastKnownBearing by rememberSaveable { mutableDoubleStateOf(0.0) }
-
-    val myRealPoint = remember(serviceLocationState, localLocationState) {
-        val loc = serviceLocationState ?: localLocationState
-        if (loc != null) {
-            lastKnownLoc = Pair(loc.longitude, loc.latitude)
-            lastKnownBearing = loc.bearing.toDouble()
-            Point.fromLngLat(loc.longitude, loc.latitude)
-        } else {
-            lastKnownLoc?.let { Point.fromLngLat(it.first, it.second) }
-        }
-    }
-
-    val currentSpeed = remember(serviceLocationState, localLocationState) {
-        val loc = serviceLocationState ?: localLocationState
-        loc?.speed ?: 0f
-    }
-
-    val currentBearing = remember(serviceLocationState, localLocationState) {
-        val loc = serviceLocationState ?: localLocationState
-        if (loc != null) loc.bearing.toDouble() else lastKnownBearing
-    }
-
-    val distToDestMeters = remember(myRealPoint, uiState.endPoint) {
-        if (myRealPoint != null && uiState.endPoint != null) {
-            val results = FloatArray(1)
-            Location.distanceBetween(
-                myRealPoint.latitude(), myRealPoint.longitude(), uiState.endPoint!!.latitude(),
-                uiState.endPoint!!.longitude(), results
-            )
-            results[0]
-        } else Float.MAX_VALUE
-    }
-
-    val handleArrivedClick = {
-        if (uiState.endPoint == null) {
-            Toast.makeText(context, "Destination not set by host.", Toast.LENGTH_SHORT)
-                .show()
-        } else if (distToDestMeters > 200f) {
-            showTooFarDialog = true
-        } else {
-            showArrivedConfirmDialog = true
         }
     }
 
@@ -241,45 +221,29 @@ fun SoloNavigationScreen(
         }
     }
 
-    // Fetch Route & Cache it
-    LaunchedEffect(myRealPoint, uiState.endPoint) {
-        if (myRealPoint != null && uiState.endPoint != null && routeResult == null) {
-            val fetchedRoute = routeRepository.getNavigationRoute(myRealPoint!!, uiState.endPoint!!)
-            if (fetchedRoute != null) {
-                routeResult = fetchedRoute
-                NavigationCache.sessionId = sessionId
-                NavigationCache.currentRoute = fetchedRoute
-            }
-        }
-    }
-
-    // Off-Route Detection
     LaunchedEffect(myRealPoint) {
         if (isNavigating && myRealPoint != null && routeResult != null && !isRerouting && uiState.endPoint != null) {
             var minDistToLine = Float.MAX_VALUE
             routeResult!!.routePoints.forEach { point ->
-                val dist = distanceBetween(myRealPoint!!, point)
+                val dist = distanceBetween(myRealPoint, point)
                 if (dist < minDistToLine) minDistToLine = dist
             }
 
             if (minDistToLine > 60f) {
                 isRerouting = true
                 if (isVoiceEnabled) tts?.speak("Rerouting", TextToSpeech.QUEUE_FLUSH, null, null)
-                val newRoute = routeRepository.getNavigationRoute(myRealPoint!!, uiState.endPoint!!)
-                if (newRoute != null) {
-                    routeResult = newRoute
-                    NavigationCache.currentRoute = newRoute
-                }
+
+                viewModel.fetchNavigationRoute(myRealPoint)
+
+                // Reset flag after a brief delay to allow ViewModel to fetch
+                delay(2000)
                 isRerouting = false
             }
         }
     }
 
     val mapViewportState = rememberMapViewportState {
-        setCameraOptions {
-            center(Point.fromLngLat(75.7950, 26.9190))
-            zoom(14.0)
-        }
+        setCameraOptions { center(Point.fromLngLat(75.7950, 26.9190)); zoom(14.0) }
     }
 
     val stepData = remember(myRealPoint, routeResult) {
@@ -289,11 +253,9 @@ fun SoloNavigationScreen(
         routeResult!!.steps.forEachIndexed { index, step ->
             val dist = distanceBetween(myRealPoint, step.location)
             if (dist < closestDist) {
-                closestDist = dist
-                closestIndex = index
+                closestDist = dist; closestIndex = index
             }
         }
-
         val targetIndex =
             if (closestDist < 30f && closestIndex + 1 < routeResult!!.steps.size) closestIndex + 1 else closestIndex
         val secondaryIndex = if (targetIndex + 1 < routeResult!!.steps.size) targetIndex + 1 else -1
@@ -306,15 +268,14 @@ fun SoloNavigationScreen(
 
     val upcomingStep = stepData?.first
     val secondaryStep = stepData?.second
-
     val currentInstruction = upcomingStep?.instruction
+
     LaunchedEffect(currentInstruction) {
         if (isNavigating && currentInstruction != null && !isRerouting && isVoiceEnabled) {
             tts?.speak(currentInstruction, TextToSpeech.QUEUE_FLUSH, null, null)
         }
     }
 
-    // This runs instantly when the button is pressed, regardless of movement.
     LaunchedEffect(is3DMode) {
         if (hasInitialFlyToDone) {
             mapViewportState.flyTo(
@@ -327,13 +288,9 @@ fun SoloNavigationScreen(
 
     LaunchedEffect(myRealPoint, isNavigating, upcomingStep) {
         if (isNavigating && myRealPoint != null) {
-            val targetBearing = if (currentSpeed > 1f && currentBearing != 0.0) {
-                currentBearing
-            } else if (upcomingStep != null) {
-                calculateRouteBearing(myRealPoint, upcomingStep.location)
-            } else {
-                currentBearing
-            }
+            val targetBearing = if (currentSpeed > 1f && currentBearing != 0.0) currentBearing
+            else if (upcomingStep != null) calculateRouteBearing(myRealPoint, upcomingStep.location)
+            else currentBearing
 
             mapViewportState.flyTo(
                 CameraOptions.Builder()
@@ -356,53 +313,27 @@ fun SoloNavigationScreen(
     }
 
     if (showTooFarDialog) {
-        AlertDialog(
-            onDismissRequest = { showTooFarDialog = false },
-            title = { Text("Too Far Away") },
-            text = {
-                Text(
-                    "You must be within 200 meters of the destination to check in. You are currently ${distToDestMeters.toInt()} meters away."
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { showTooFarDialog = false }) {
-                    Text(
-                        "Got it"
-                    )
-                }
-            }
+        TooFarDialog(
+            distanceMeters = distanceRemaining,
+            onDismiss = { setShowTooFarDialog(false) }
         )
     }
 
-    if (showArrivedConfirmDialog) {
-        AlertDialog(
-            onDismissRequest = { showArrivedConfirmDialog = false },
-            title = { Text("Mark as Arrived?") },
-            text = {
-                Text(
-                    "This will automatically pause your location tracking and notify everyone that you have reached the destination."
-                )
+    arrivedDialogState?.let { isArriving ->
+        ArrivedToggleDialog(
+            isArriving = isArriving,
+            onConfirm = {
+                setArrivedDialogState(null)
+                viewModel.toggleUserArrived(uiState.currentUserId, isArriving)
             },
-            confirmButton = {
-                Button(onClick = {
-                    showArrivedConfirmDialog = false
-                    scope.launch { repository.markUserAsArrived(sessionId, uiState.currentUserId) }
-                }) { Text("Confirm") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showArrivedConfirmDialog = false }) {
-                    Text(
-                        "Cancel"
-                    )
-                }
-            }
+            onDismiss = { setArrivedDialogState(null) }
         )
     }
 
     val turnDistanceFloat = remember(myRealPoint, upcomingStep) {
-        if (myRealPoint != null && upcomingStep != null) {
-            distanceBetween(myRealPoint, upcomingStep.location)
-        } else Float.MAX_VALUE
+        if (myRealPoint != null && upcomingStep != null) distanceBetween(
+            myRealPoint, upcomingStep.location
+        ) else Float.MAX_VALUE
     }
 
     val turnDistanceText = remember(turnDistanceFloat) {
@@ -420,8 +351,7 @@ fun SoloNavigationScreen(
             isRerouting -> Color(0xFFB71C1C)
             turnDistanceFloat < 150f -> Color(0xFFE65100)
             else -> Color(0xFF1B5E20)
-        },
-        animationSpec = tween(500)
+        }, animationSpec = tween(500)
     )
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -544,20 +474,20 @@ fun SoloNavigationScreen(
                 AnimatedVisibility(visible = isViewMenuExpanded) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         SmallFloatingActionButton(
-                            onClick = { is3DMode = true; isViewMenuExpanded = false },
+                            onClick = { is3DMode = true; setViewMenuExpanded(false) },
                             containerColor = if (is3DMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
                             contentColor = if (is3DMode) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary
                         ) { Text("3D", fontWeight = FontWeight.Bold) }
 
                         SmallFloatingActionButton(
-                            onClick = { is3DMode = false; isViewMenuExpanded = false },
+                            onClick = { is3DMode = false; setViewMenuExpanded(false) },
                             containerColor = if (!is3DMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
                             contentColor = if (!is3DMode) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary
                         ) { Text("2D", fontWeight = FontWeight.Bold) }
                     }
                 }
                 FloatingActionButton(
-                    onClick = { isViewMenuExpanded = !isViewMenuExpanded },
+                    onClick = { setViewMenuExpanded(!isViewMenuExpanded) },
                     containerColor = MaterialTheme.colorScheme.surface,
                     contentColor = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(48.dp),
@@ -583,34 +513,64 @@ fun SoloNavigationScreen(
                 shape = CircleShape
             ) { Icon(Icons.Default.MyLocation, null) }
 
-            Button(
-                onClick = {
-                    uiState.endPoint?.let { point ->
-                        try {
-                            val uri =
-                                "google.navigation:q=${point.latitude()},${point.longitude()}".toUri()
-                            context.startActivity(
-                                Intent(Intent.ACTION_VIEW, uri).setPackage(
-                                    "com.google.android.apps.maps"
-                                )
-                            )
-                        } catch (_: Exception) {
-                            Toast.makeText(context, "Maps not found", Toast.LENGTH_SHORT)
-                                .show()
-                        }
-                    }
-                },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    contentColor = MaterialTheme.colorScheme.primary
-                ),
-                shape = RoundedCornerShape(12.dp),
-                elevation = ButtonDefaults.buttonElevation(4.dp),
-                contentPadding = PaddingValues(horizontal = 12.dp)
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Icon(Icons.Default.DirectionsCar, null, modifier = Modifier.size(22.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Open G Maps", fontWeight = FontWeight.Bold)
+
+                if (isArrivalEnabled) {
+                    Button(
+                        onClick = { viewModel.attemptCheckIn(myRealPoint, !hasArrived) },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (hasArrived) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = if (hasArrived) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSecondaryContainer
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        elevation = ButtonDefaults.buttonElevation(4.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp)
+                    ) {
+                        Icon(
+                            if (hasArrived) Icons.AutoMirrored.Filled.Undo else Icons.Default.TaskAlt,
+                            null,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            if (hasArrived) "Undo reached" else "Reached dest",
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                Button(
+                    onClick = {
+                        uiState.endPoint?.let { point ->
+                            try {
+                                val uri =
+                                    "google.navigation:q=${point.latitude()},${point.longitude()}".toUri()
+                                context.startActivity(
+                                    Intent(Intent.ACTION_VIEW, uri).setPackage(
+                                        "com.google.android.apps.maps"
+                                    )
+                                )
+                            } catch (_: Exception) {
+                                Toast.makeText(context, "Maps not found", Toast.LENGTH_SHORT)
+                                    .show()
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        contentColor = MaterialTheme.colorScheme.primary
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    elevation = ButtonDefaults.buttonElevation(4.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp)
+                ) {
+                    Icon(Icons.Default.DirectionsCar, null, modifier = Modifier.size(22.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Open G Maps", fontWeight = FontWeight.Bold)
+                }
             }
         }
 
@@ -645,21 +605,6 @@ fun SoloNavigationScreen(
                         text = distTotal, style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium
                     )
-                }
-
-                if (isArrivalEnabled && !hasArrived) {
-                    Button(
-                        onClick = handleArrivedClick, modifier = Modifier.height(48.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.TaskAlt, null, modifier = Modifier.size(20.dp),
-                            tint = Color.White
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
                 }
 
                 Button(

@@ -66,6 +66,8 @@ import androidx.compose.material.icons.filled.Security
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
+import com.example.multilink.ui.components.dialogs.ArrivedToggleDialog
+import com.example.multilink.ui.components.dialogs.TooFarDialog
 import com.example.multilink.utils.HapticHelper
 
 @Composable
@@ -76,17 +78,16 @@ fun HomeScreen(
     onDrawerClick: () -> Unit,
     onProfileClick: () -> Unit,
     initialJoinCode: String? = null,
-    onRestrictedSessionClick: () -> Unit,
     onNavigateSession: (SessionData) -> Unit
 ) {
-    var showCreateDialog by rememberSaveable { mutableStateOf(false) }
-    var showJoinDialog by rememberSaveable { mutableStateOf(false) }
-    var joinDialogInitCode by remember { mutableStateOf<String?>(null) }
+    val (showCreateDialog, setShowCreateDialog) = rememberSaveable { mutableStateOf(false) }
+    val (showJoinDialog, setShowJoinDialog) = rememberSaveable { mutableStateOf(false) }
+    val (joinDialogInitCode, setJoinDialogInitCode) = remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(initialJoinCode) {
         if (initialJoinCode != null) {
-            joinDialogInitCode = initialJoinCode
-            showJoinDialog = true
+            setJoinDialogInitCode(initialJoinCode)
+            setShowJoinDialog(true)
         }
     }
 
@@ -102,6 +103,16 @@ fun HomeScreen(
 
     val networkMonitor = remember { NetworkMonitor(context) }
     val isOnline by networkMonitor.isOnline.collectAsState(initial = true)
+
+    val realLocationState by LocationService.currentLocation.collectAsState()
+
+    val (showTooFarDialog, setShowTooFarDialog) = remember { mutableStateOf(false) }
+    val (pendingArrivalState, setPendingArrivalState) = remember {
+        mutableStateOf<Pair<SessionData, Boolean>?>(
+            null
+        )
+    }
+    var distanceRemaining by remember { mutableIntStateOf(0) }
 
     if (!view.isInEditMode) {
         SideEffect {
@@ -124,11 +135,10 @@ fun HomeScreen(
         label = "TopBarPadding"
     )
 
-    var sessionToPause by remember { mutableStateOf<SessionData?>(null) }
-    var sessionToEdit by remember { mutableStateOf<SessionData?>(null) }
-    var sessionToInfo by remember { mutableStateOf<SessionData?>(null) }
-
-    var currentSortOption by rememberSaveable { mutableStateOf("Newest") }
+    val (sessionToPause, setSessionToPause) = remember { mutableStateOf<SessionData?>(null) }
+    val (sessionToEdit, setSessionToEdit) = remember { mutableStateOf<SessionData?>(null) }
+    val (sessionToInfo, setSessionToInfo) = remember { mutableStateOf<SessionData?>(null) }
+    val (currentSortOption, setCurrentSortOption) = rememberSaveable { mutableStateOf("Newest") }
 
     fun startTrackingService(sessionId: String) {
         val serviceIntent = Intent(context, LocationService::class.java).apply {
@@ -205,7 +215,7 @@ fun HomeScreen(
                             scope.launch { pagerState.animateScrollToPage(newPage) }
                         },
                         currentSort = currentSortOption,
-                        onSortChanged = { currentSortOption = it }
+                        onSortChanged = { setCurrentSortOption(it) }
                     )
 
                     // The Horizontal Pager wrapping the list
@@ -232,9 +242,11 @@ fun HomeScreen(
                                     }
                                 } else if (sortedSessions.isEmpty()) {
                                     EmptySessionState(
-                                        onCreateClick = { showCreateDialog = true },
+                                        onCreateClick = { setShowCreateDialog(true) },
                                         onJoinClick = {
-                                            joinDialogInitCode = null; showJoinDialog = true
+                                            setJoinDialogInitCode(
+                                                null
+                                            ); setShowJoinDialog(true)
                                         }
                                     )
                                 } else {
@@ -297,7 +309,7 @@ fun HomeScreen(
                                                 }
                                             },
                                             onShareClick = { onShareSession(session) },
-                                            onPauseClick = { sessionToPause = session },
+                                            onPauseClick = { setSessionToPause(session) },
                                             onResumeClick = {
                                                 scope.launch {
                                                     repository.updateSessionStatus(
@@ -307,7 +319,7 @@ fun HomeScreen(
                                             },
                                             onEditClick = {
                                                 if (isOnline) {
-                                                    sessionToEdit = session
+                                                    setSessionToEdit(session)
                                                 } else {
                                                     HapticHelper.trigger(
                                                         context, HapticHelper.Type.ERROR
@@ -315,14 +327,32 @@ fun HomeScreen(
                                                     networkErrorTrigger++
                                                 }
                                             },
-                                            onInfoClick = { sessionToInfo = session },
-                                            onArrivedClick = {
-                                                scope.launch {
-                                                    repository.markUserAsArrived(
-                                                        session.id, currentUserId
+                                            onInfoClick = { setSessionToInfo(session) },
+                                            onArrivedClick = { isArriving ->
+                                                val destLat = session.endLat
+                                                val destLng = session.endLng
+                                                val currentLoc = realLocationState
+
+                                                if (!isArriving) {
+                                                    setPendingArrivalState(Pair(session, false))
+                                                } else if (currentLoc != null && destLat != null && destLng != null && destLat != 0.0) {
+                                                    val results = FloatArray(1)
+                                                    android.location.Location.distanceBetween(
+                                                        currentLoc.latitude, currentLoc.longitude,
+                                                        destLat, destLng, results
                                                     )
+                                                    val dist = results[0]
+
+                                                    if (dist > 200f) {
+                                                        distanceRemaining = dist.toInt()
+                                                        setShowTooFarDialog(true)
+                                                    } else {
+                                                        setPendingArrivalState(Pair(session, true))
+                                                    }
+                                                } else {
                                                     Toast.makeText(
-                                                        context, "Marked as Arrived!",
+                                                        context,
+                                                        "Waiting for GPS or Destination...",
                                                         Toast.LENGTH_SHORT
                                                     )
                                                         .show()
@@ -435,18 +465,47 @@ fun HomeScreen(
                 AnimatedFab(
                     isVisible = uiState.sessions.isNotEmpty() && pagerState.currentPage == 0,
                     isOnline = isOnline,
-                    onCreateClick = { showCreateDialog = true },
-                    onJoinClick = { joinDialogInitCode = null; showJoinDialog = true },
+                    onCreateClick = { setShowCreateDialog(true) },
+                    onJoinClick = { setJoinDialogInitCode(null); setShowJoinDialog(true) },
                     onErrorTrigger = { networkErrorTrigger++ }
                 )
             }
 
             // D. Dialogs & Overlays
+            if (showTooFarDialog) {
+                TooFarDialog(
+                    distanceMeters = distanceRemaining,
+                    onDismiss = { setShowTooFarDialog(false) }
+                )
+            }
+
+            pendingArrivalState?.let { (session, isArriving) ->
+                ArrivedToggleDialog(
+                    isArriving = isArriving,
+                    onConfirm = {
+                        scope.launch {
+                            val auth = com.google.firebase.auth.FirebaseAuth.getInstance()
+                            val currentUserId = auth.currentUser?.uid ?: ""
+                            repository.toggleUserArrivedStatus(
+                                session.id, currentUserId, isArriving
+                            )
+                            Toast.makeText(
+                                context, if (isArriving) "Marked as Arrived!" else "Arrival Undone",
+                                Toast.LENGTH_SHORT
+                            )
+                                .show()
+                            setPendingArrivalState(null)
+                        }
+                    },
+                    onDismiss = { setPendingArrivalState(null) }
+                )
+            }
+
             if (showCreateDialog) {
                 CreateSessionDialog(
-                    onDismiss = { showCreateDialog = false },
+                    onDismiss = { setShowCreateDialog(false) },
                     onSuccess = { newSession, isSharing ->
-                        showCreateDialog = false
+                        setShowCreateDialog(false)
                         Toast.makeText(context, "Creating session...", Toast.LENGTH_SHORT)
                             .show()
                         scope.launch {
@@ -460,9 +519,9 @@ fun HomeScreen(
             if (showJoinDialog) {
                 UnifiedJoinDialog(
                     initialCode = joinDialogInitCode,
-                    onDismiss = { showJoinDialog = false },
+                    onDismiss = { setShowJoinDialog(false) },
                     onJoinConfirmed = { realSessionId ->
-                        showJoinDialog = false
+                        setShowJoinDialog(false)
                         Toast.makeText(context, "Joining session...", Toast.LENGTH_SHORT)
                             .show()
                         scope.launch {
@@ -484,23 +543,23 @@ fun HomeScreen(
                 PauseWarningDialog(
                     onConfirm = {
                         scope.launch {
-                            repository.updateSessionStatus(sessionToPause!!.id, isPaused = true)
-                            sessionToPause = null
+                            repository.updateSessionStatus(sessionToPause.id, isPaused = true)
+                            setSessionToPause(null)
                         }
                     },
-                    onDismiss = { sessionToPause = null }
+                    onDismiss = { setSessionToPause(null) }
                 )
             }
 
             if (sessionToEdit != null) {
                 CreateSessionDialog(
                     existingSession = sessionToEdit,
-                    onDismiss = { sessionToEdit = null },
+                    onDismiss = { setSessionToEdit(null) },
                     onSuccess = { updatedSession, isSharing ->
                         scope.launch {
                             val finalSession = updatedSession.copy(
-                                id = sessionToEdit!!.id, hostId = sessionToEdit!!.hostId,
-                                status = sessionToEdit!!.status, isHostSharing = isSharing
+                                id = sessionToEdit.id, hostId = sessionToEdit.hostId,
+                                status = sessionToEdit.status, isHostSharing = isSharing
                             )
                             repository.updateSession(finalSession)
 
@@ -510,7 +569,7 @@ fun HomeScreen(
                                 stopTrackingService(isRemoval = true)
                             }
 
-                            sessionToEdit = null
+                            setSessionToEdit(null)
                             Toast.makeText(context, "Session Updated", Toast.LENGTH_SHORT)
                                 .show()
                         }
@@ -519,7 +578,7 @@ fun HomeScreen(
             }
 
             if (sessionToInfo != null) {
-                SessionInfoDialog(session = sessionToInfo!!, onDismiss = { sessionToInfo = null })
+                SessionInfoDialog(session = sessionToInfo, onDismiss = { setSessionToInfo(null) })
             }
         }
     }
@@ -555,7 +614,7 @@ fun ExpandableActionFab(
     onErrorTrigger: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var isExpanded by remember { mutableStateOf(false) }
+    val (isExpanded, setExpanded) = remember { mutableStateOf(false) }
     val context = LocalContext.current
 
     val contentAlpha = if (isOnline) 1f else 0.38f
@@ -574,7 +633,7 @@ fun ExpandableActionFab(
         onClick = {
             if (!isExpanded) {
                 HapticHelper.trigger(context, HapticHelper.Type.LIGHT)
-                isExpanded = true
+                setExpanded(true)
             }
         }
     ) {
@@ -596,11 +655,11 @@ fun ExpandableActionFab(
                     onClick = {
                         if (isOnline) {
                             HapticHelper.trigger(context, HapticHelper.Type.LIGHT)
-                            isExpanded = false
+                            setExpanded(false)
                             onJoinClick()
                         } else {
                             HapticHelper.trigger(context, HapticHelper.Type.ERROR)
-                            isExpanded = false
+                            setExpanded(false)
                             onErrorTrigger()
                         }
                     },
@@ -622,11 +681,11 @@ fun ExpandableActionFab(
                     onClick = {
                         if (isOnline) {
                             HapticHelper.trigger(context, HapticHelper.Type.LIGHT)
-                            isExpanded = false
+                            setExpanded(false)
                             onCreateClick()
                         } else {
                             HapticHelper.trigger(context, HapticHelper.Type.ERROR)
-                            isExpanded = false
+                            setExpanded(false)
                             onErrorTrigger()
                         }
                     },
@@ -640,7 +699,7 @@ fun ExpandableActionFab(
                 IconButton(
                     onClick = {
                         HapticHelper.trigger(context, HapticHelper.Type.LIGHT)
-                        isExpanded = false
+                        setExpanded(false)
                     }
                 ) {
                     Icon(Icons.Default.Close, "Close", modifier = Modifier.size(20.dp))
@@ -665,7 +724,7 @@ fun HomeTabSwitcher(
     val context = LocalContext.current
 
     // State for the dropdown menu
-    var showSortMenu by remember { mutableStateOf(false) }
+    val (showSortMenu, setShowSortMenu) = remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -755,7 +814,7 @@ fun HomeTabSwitcher(
                     Surface(
                         onClick = {
                             HapticHelper.trigger(context, HapticHelper.Type.LIGHT)
-                            showSortMenu = true
+                            setShowSortMenu(true)
                         },
                         shape = RoundedCornerShape(8.dp),
                         color = MaterialTheme.colorScheme.surfaceContainerHighest,
@@ -785,7 +844,7 @@ fun HomeTabSwitcher(
                     // The Dropdown Menu
                     DropdownMenu(
                         expanded = showSortMenu,
-                        onDismissRequest = { showSortMenu = false },
+                        onDismissRequest = { setShowSortMenu(false) },
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         val options = listOf("Newest", "Oldest", "A-Z", "Z-A")
@@ -805,7 +864,7 @@ fun HomeTabSwitcher(
                                 onClick = {
                                     HapticHelper.trigger(context, HapticHelper.Type.LIGHT)
                                     onSortChanged(option)
-                                    showSortMenu = false
+                                    setShowSortMenu(false)
                                 }
                             )
                         }

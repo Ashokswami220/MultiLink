@@ -66,7 +66,6 @@ import com.example.multilink.ui.main.RecentScreen
 import com.example.multilink.ui.otherScreens.RecentSessionDetailScreen
 import com.example.multilink.ui.tracker.SeeAllScreen
 import com.example.multilink.ui.otherScreens.UserProfileScreen
-import com.example.multilink.ui.tracker.RestrictedScreen
 import com.example.multilink.utils.NetworkMonitor
 import com.google.firebase.auth.FirebaseAuth
 import dev.chrisbanes.haze.HazeState
@@ -400,12 +399,7 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
                                                     },
                                                     onProfileClick = onProfileClick,
                                                     onDrawerClick = {},
-                                                    initialJoinCode = startJoinCode,
-                                                    onRestrictedSessionClick = {
-                                                        navController.navigate(
-                                                            MultiLinkRoutes.RESTRICTED
-                                                        )
-                                                    }
+                                                    initialJoinCode = startJoinCode
                                                 )
                                             }
 
@@ -912,23 +906,6 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
                                 checkProfileAndNavigate()
                             }
                         )
-                    }
-
-                    composable(
-                        route = MultiLinkRoutes.RESTRICTED,
-                        enterTransition = {
-                            slideInHorizontally(
-                                initialOffsetX = { it },
-                                animationSpec = tween(ANIM_DURATION)
-                            )
-                        },
-                        exitTransition = {
-                            slideOutHorizontally(
-                                targetOffsetX = { it }, animationSpec = tween(ANIM_DURATION)
-                            )
-                        }
-                    ) {
-                        RestrictedScreen(onBackClick = { navController.popBackStack() })
                     }
 
                     // ABOUT

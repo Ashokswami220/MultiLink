@@ -47,7 +47,8 @@ fun Map<String, Any>.toSessionData(sessionId: String): SessionData {
         isUsersVisible = this["isUsersVisible"] as? Boolean ?: true,
         isHostSharing = this["isHostSharing"] as? Boolean ?: true,
         maxPeople = this["maxPeople"] as? String ?: "10",
-        activeUsers = (this["activeUsers"] as? Number)?.toInt() ?: 0
+        activeUsers = (this["activeUsers"] as? Number)?.toInt() ?: 0,
+        isArrivalTrackingEnabled = this["isArrivalTrackingEnabled"] as? Boolean ?: false
     )
 }
 

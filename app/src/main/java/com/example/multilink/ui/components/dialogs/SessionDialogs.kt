@@ -3,6 +3,51 @@ package com.example.multilink.ui.components.dialogs
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
+
+@Composable
+fun TooFarDialog(
+    distanceMeters: Int,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Too Far Away") },
+        text = {
+            Text(
+                "You must be within 200 meters of the destination to check in. You are currently $distanceMeters meters away."
+            )
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Got it") } }
+    )
+}
+
+@Composable
+fun ArrivedToggleDialog(
+    isArriving: Boolean,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (isArriving) "Mark as Arrived?" else "Undo Arrival?") },
+        text = {
+            Text(
+                if (isArriving) "This will automatically pause your location tracking and notify everyone that you have reached the destination."
+                else "This will resume your active tracking and notify everyone."
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isArriving) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
+                )
+            ) { Text(if (isArriving) "Reached" else "Undo") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
 
 @Composable
 fun DeleteSessionDialog(

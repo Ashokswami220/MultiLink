@@ -247,11 +247,3 @@ fun LoveFromBadge(modifier: Modifier = Modifier) {
         )
     }
 }
-
-@Preview
-@Composable
-fun PreviewLogin() {
-    MultiLinkTheme {
-        LoginScreen(onLoginSuccess = {})
-    }
-}

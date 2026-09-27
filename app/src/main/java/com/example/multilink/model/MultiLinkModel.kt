@@ -23,7 +23,12 @@ data class SessionData(
     val isSharingAllowed: Boolean = true,
     val isHostSharing: Boolean = true,
     val activeUsers: Int = 1,
-    val isArrivalTrackingEnabled: Boolean = false
+    val isArrivalTrackingEnabled: Boolean = false,
+    val sessionType: String = "Standard",
+    val isLeaveAllowed: Boolean = true,
+    val isLocationHistoryEnabled: Boolean = false,
+    val historyIntervalMins: Int = 30,
+    val isRouteTracingEnabled: Boolean = false
 )
 
 fun Map<String, Any>.toSessionData(sessionId: String): SessionData {
@@ -48,7 +53,12 @@ fun Map<String, Any>.toSessionData(sessionId: String): SessionData {
         isHostSharing = this["isHostSharing"] as? Boolean ?: true,
         maxPeople = this["maxPeople"] as? String ?: "10",
         activeUsers = (this["activeUsers"] as? Number)?.toInt() ?: 0,
-        isArrivalTrackingEnabled = this["isArrivalTrackingEnabled"] as? Boolean ?: false
+        isArrivalTrackingEnabled = this["isArrivalTrackingEnabled"] as? Boolean ?: false,
+        sessionType = this["sessionType"] as? String ?: "Standard",
+        isLeaveAllowed = this["isLeaveAllowed"] as? Boolean ?: true,
+        isLocationHistoryEnabled = this["isLocationHistoryEnabled"] as? Boolean ?: false,
+        historyIntervalMins = (this["historyIntervalMins"] as? Number)?.toInt() ?: 30,
+        isRouteTracingEnabled = this["isRouteTracingEnabled"] as? Boolean ?: false
     )
 }
 
@@ -72,7 +82,8 @@ data class SessionParticipant(
     val status: String = "Online",
     val lastUpdated: Long = 0L,
     val speed: Float = 0f,
-    val hasArrived: Boolean = false
+    val hasArrived: Boolean = false,
+    val joinedAt: Long = System.currentTimeMillis()
 )
 
 data class SearchResult(

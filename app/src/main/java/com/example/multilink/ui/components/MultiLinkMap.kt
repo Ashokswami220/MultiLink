@@ -21,8 +21,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.mapbox.bindgen.Value
 import com.mapbox.geojson.Point
@@ -32,7 +30,6 @@ import com.mapbox.maps.extension.compose.MapEffect
 import com.mapbox.maps.extension.compose.MapboxMap
 import com.mapbox.maps.extension.compose.MapboxMapScope
 import com.mapbox.maps.extension.compose.animation.viewport.MapViewportState
-import com.mapbox.maps.extension.compose.annotation.generated.PolylineAnnotation
 import com.mapbox.maps.plugin.locationcomponent.createDefault2DPuck
 import com.mapbox.maps.plugin.locationcomponent.location
 import com.mapbox.maps.plugin.scalebar.scalebar
@@ -77,8 +74,11 @@ import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import com.mapbox.maps.CameraBoundsOptions
 import com.mapbox.maps.CameraOptions
 import com.mapbox.maps.extension.style.layers.addLayer
+import com.mapbox.maps.extension.style.layers.addLayerAbove
 import com.mapbox.maps.extension.style.layers.addLayerBelow
 import com.mapbox.maps.extension.style.sources.addSource
 import com.mapbox.maps.extension.style.sources.getSource
@@ -90,8 +90,8 @@ fun MultiLinkMap(
     viewportState: MapViewportState,
     hasLocationPermission: Boolean,
     enableLocationPuck: Boolean = true,
-    followUser: Boolean = false,
     topContentPadding: Dp = 0.dp,
+    followUser: Boolean = false,
     routePoints: List<Point> = emptyList(),
     onMapLoaded: () -> Unit = {},
     content: (@Composable MapboxMapScope.() -> Unit)? = null,
@@ -112,6 +112,13 @@ fun MultiLinkMap(
 
         ) {
             MapEffect(Unit) { mapView ->
+                mapView.mapboxMap.setBounds(
+                    CameraBoundsOptions.Builder()
+                        .maxZoom(25.0)
+                        .minZoom(2.0)
+                        .build()
+                )
+
                 mapView.mapboxMap.loadStyle(Style.STANDARD) { style ->
                     style.setStyleImportConfigProperty(
                         "basemap", "showPointOfInterestLabels", Value(true)
@@ -164,12 +171,13 @@ fun MultiLinkMap(
 
             // 3: Smart Layering - Dynamically finds the puck or labels to put the route UNDER them
             MapEffect(routePoints, isStyleLoaded) { mapView ->
-                if (!isStyleLoaded) return@MapEffect // Wait until map is ready
+                if (!isStyleLoaded) return@MapEffect
 
-                mapView.mapboxMap.getStyle()
+                mapView.mapboxMap.style
                     ?.let { style ->
                         val sourceId = "custom-route-source"
                         val layerId = "custom-route-layer"
+                        val arrowLayerId = "custom-route-arrow-layer"
 
                         if (routePoints.isNotEmpty()) {
                             val lineString = com.mapbox.geojson.LineString.fromLngLats(routePoints)
@@ -196,14 +204,30 @@ fun MultiLinkMap(
                                         .lineWidth(6.0)
                                         .lineOpacity(1.0)
 
-                                // Explicitly place the route line underneath the location puck
+                                val arrowLayer =
+                                    com.mapbox.maps.extension.style.layers.generated.SymbolLayer(
+                                        arrowLayerId, sourceId
+                                    )
+                                        .textField("➤")
+                                        .textSize(16.0)
+                                        .textColor("#FFFFFF")
+                                        .symbolPlacement(
+                                            com.mapbox.maps.extension.style.layers.properties.generated.SymbolPlacement.LINE
+                                        )
+                                        .symbolSpacing(80.0)
+
                                 if (style.styleLayerExists("mapbox-location-indicator-layer")) {
                                     style.addLayerBelow(layer, "mapbox-location-indicator-layer")
+                                    style.addLayerAbove(arrowLayer, layerId)
                                 } else {
                                     style.addLayer(layer)
+                                    style.addLayerAbove(arrowLayer, layerId)
                                 }
                             }
                         } else {
+                            if (style.styleLayerExists(arrowLayerId)) style.removeStyleLayer(
+                                arrowLayerId
+                            )
                             if (style.styleLayerExists(layerId)) style.removeStyleLayer(layerId)
                             if (style.styleSourceExists(sourceId)) style.removeStyleSource(sourceId)
                         }
@@ -326,16 +350,19 @@ fun MapboxMapScope.SessionMapContent(
 @Composable
 fun MyLocationFab(
     modifier: Modifier = Modifier,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    visible: Boolean = true
 ) {
-    FloatingActionButton(
-        onClick = onClick,
-        containerColor = MaterialTheme.colorScheme.surface,
-        contentColor = MaterialTheme.colorScheme.primary,
-        shape = CircleShape,
-        modifier = modifier.size(48.dp)
-    ) {
-        Icon(Icons.Outlined.MyLocation, "Follow Me")
+    if (visible) {
+        FloatingActionButton(
+            onClick = onClick,
+            containerColor = MaterialTheme.colorScheme.surface,
+            contentColor = MaterialTheme.colorScheme.primary,
+            shape = CircleShape,
+            modifier = modifier.size(48.dp)
+        ) {
+            Icon(Icons.Outlined.MyLocation, "Follow Me")
+        }
     }
 }
 

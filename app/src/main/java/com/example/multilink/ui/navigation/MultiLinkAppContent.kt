@@ -29,7 +29,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
@@ -47,8 +46,8 @@ data class MultiLinkNavItem(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MultiLinkTopBar(
+    title: String,
     modifier: Modifier = Modifier,
-    onDrawerClick: () -> Unit,
     onProfileClick: () -> Unit,
     containerColor: Color = MaterialTheme.colorScheme.surface,
     profileColor: Color = MaterialTheme.colorScheme.primary,
@@ -60,25 +59,16 @@ fun MultiLinkTopBar(
     val auth = remember { FirebaseAuth.getInstance() }
     val myPhotoUrl = auth.currentUser?.photoUrl?.toString()
 
-    CenterAlignedTopAppBar(
+    TopAppBar(
         modifier = modifier.shadow(elevation = elevation),
         title = {
             Text(
-                text = stringResource(id = R.string.app_name),
+                text = title,
                 style = MaterialTheme.typography.headlineSmall.copy(
-                    fontWeight = FontWeight.SemiBold
+                    fontWeight = FontWeight.Bold
                 ),
                 modifier = Modifier.alpha(titleAlpha)
             )
-        },
-        navigationIcon = {
-            IconButton(onClick = onDrawerClick) {
-                Icon(
-                    imageVector = Icons.Default.Menu,
-                    contentDescription = stringResource(id = R.string.cd_open_drawer),
-                    modifier = Modifier.size(dimensionResource(id = R.dimen.icon_menu)),
-                )
-            }
         },
         actions = {
             IconButton(onClick = onProfileClick) {
@@ -102,9 +92,8 @@ fun MultiLinkTopBar(
         },
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor = containerColor,
-            navigationIconContentColor = contentColor,
-            actionIconContentColor = profileColor,
-            titleContentColor = contentColor
+            titleContentColor = contentColor,
+            actionIconContentColor = profileColor
         ),
         windowInsets = windowInsets
     )
@@ -163,8 +152,7 @@ private fun BottomNavigationBar(
     val barCornerSize = dimensionResource(id = R.dimen.corner_bottom_bar)
 
     Surface(
-        modifier = modifier
-            .fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(topStart = barCornerSize, topEnd = barCornerSize),
         color = MaterialTheme.colorScheme.surfaceContainer,
         tonalElevation = dimensionResource(id = R.dimen.elevation_card),
@@ -190,7 +178,7 @@ private fun BottomNavigationBar(
                     val isSelected = currentDestination == item.dest
                     val interactionSource = remember { MutableInteractionSource() }
 
-                    // --- Animation State ---
+                    // --- User's Lightweight Animation State ---
                     val scale = remember { Animatable(1f) }
 
                     LaunchedEffect(isSelected) {
@@ -224,10 +212,11 @@ private fun BottomNavigationBar(
                     ) {
 
                         val indicatorWidth by animateDpAsState(
-                            targetValue = if (isSelected)
+                            targetValue = if (isSelected) {
                                 dimensionResource(id = R.dimen.nav_indicator_width_selected)
-                            else
-                                dimensionResource(id = R.dimen.nav_indicator_width_unselected),
+                            } else {
+                                dimensionResource(id = R.dimen.nav_indicator_width_unselected)
+                            },
                             label = "widthAnim",
                             animationSpec = spring(dampingRatio = 0.6f)
                         )
@@ -272,11 +261,9 @@ private fun BottomNavigationBar(
                             text = item.label,
                             style = MaterialTheme.typography.labelSmall.copy(
                                 fontSize = with(LocalDensity.current) {
-                                    dimensionResource(
-                                        id = if (isSelected) R.dimen.text_nav_label_15 else R.dimen.text_nav_label
-                                    ).toSp()
+                                    dimensionResource(id = R.dimen.text_nav_label).toSp()
                                 },
-                                fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.ExtraLight
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                             ),
                             color = if (isSelected) {
                                 MaterialTheme.colorScheme.onSurface
@@ -291,6 +278,7 @@ private fun BottomNavigationBar(
         }
     }
 }
+
 
 @Composable
 fun MultiLinkNavigationRail(
@@ -412,16 +400,5 @@ fun rememberSingleClick(
             lastClickTime = currentTime
             onClick()
         }
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-fun BottomNavigationBarPreview() {
-    MaterialTheme {
-        MultiLinkNavigationBar(
-            currentDestination = BottomNavDest.Home,
-            onDestinationSelected = {}
-        )
     }
 }

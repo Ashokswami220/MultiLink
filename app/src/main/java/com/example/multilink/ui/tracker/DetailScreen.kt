@@ -53,7 +53,6 @@ import com.example.multilink.ui.components.MultiLinkMap
 import com.example.multilink.ui.components.MyLocationFab
 import com.example.multilink.ui.components.SessionControlBar
 import com.example.multilink.ui.components.SessionMapContent
-import com.example.multilink.ui.components.dialogs.SessionInfoDialog
 import com.example.multilink.ui.viewmodel.SessionViewModel
 import com.example.multilink.ui.viewmodel.SessionViewModelFactory
 import com.example.multilink.utils.LocationUtils.calculateDistance
@@ -72,6 +71,7 @@ import com.example.multilink.ui.components.dialogs.ArrivedToggleDialog
 import com.example.multilink.ui.viewmodel.SessionUiEvent
 import com.example.multilink.utils.HapticHelper
 import kotlinx.coroutines.flow.collectLatest
+import kotlin.time.Duration.Companion.milliseconds
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -81,7 +81,8 @@ fun DetailScreen(
     userId: String,
     onBackClick: () -> Unit,
     onSessionEnded: () -> Unit,
-    onSessionPaused: () -> Unit
+    onSessionPaused: () -> Unit,
+    onUserInfoClick: () -> Unit
 ) {
     val viewModel: SessionViewModel = viewModel(factory = SessionViewModelFactory(sessionId))
     val uiState by viewModel.uiState.collectAsState()
@@ -118,12 +119,7 @@ fun DetailScreen(
     val (isFullScreen, setFullScreen) = remember { mutableStateOf(false) }
     BackHandler(enabled = isFullScreen) { setFullScreen(false) }
 
-    val (showInfoDialog, setShowInfoDialog) = remember { mutableStateOf(false) }
     val (arrivedDialogState, setArrivedDialogState) = remember { mutableStateOf<Boolean?>(null) }
-
-    if (showInfoDialog && uiState.sessionData != null) {
-        SessionInfoDialog(session = uiState.sessionData!!, onDismiss = { setShowInfoDialog(false) })
-    }
 
     arrivedDialogState?.let { isArriving ->
         ArrivedToggleDialog(
@@ -131,6 +127,20 @@ fun DetailScreen(
             onConfirm = {
                 setArrivedDialogState(null)
                 viewModel.toggleUserArrived(userId, isArriving)
+
+                // Only restart the service if I am undoing MY OWN arrival!
+                // (Admins don't want to start tracking themselves if they undo someone else's arrival)
+                if (!isArriving && userId == uiState.currentUserId) {
+                    val serviceIntent = Intent(context, LocationService::class.java).apply {
+                        action = LocationService.ACTION_START
+                        putExtra(LocationService.EXTRA_SESSION_ID, sessionId)
+                    }
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                        context.startForegroundService(serviceIntent)
+                    } else {
+                        context.startService(serviceIntent)
+                    }
+                }
             },
             onDismiss = { setArrivedDialogState(null) }
         )
@@ -185,7 +195,7 @@ fun DetailScreen(
                 .show()
             onSessionEnded()
         } else if (uiState.isRemoved) {
-            kotlinx.coroutines.delay(100)
+            kotlinx.coroutines.delay(100.milliseconds)
             isNavigatingOut = true
             Toast.makeText(context, "You were removed by the host", Toast.LENGTH_LONG)
                 .show()
@@ -436,11 +446,11 @@ fun DetailScreen(
                                 )
                             ) {
                                 DropdownMenuItem(
-                                    text = { Text("Session Info") },
+                                    text = { Text("User Info") },
                                     onClick = {
                                         HapticHelper.trigger(context, HapticHelper.Type.LIGHT)
                                         setMenuExpanded(false)
-                                        setShowInfoDialog(true)
+                                        onUserInfoClick()
                                     },
                                     leadingIcon = {
                                         Icon(
@@ -810,7 +820,8 @@ fun DetailScreen(
                                 )
                                 else Toast.makeText(context, errorDestNotSetStr, Toast.LENGTH_SHORT)
                                     .show()
-                            }
+                            },
+                            showUserButton = userId != uiState.currentUserId
                         )
 
                         // 2. Full Screen Button

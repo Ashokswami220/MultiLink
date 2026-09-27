@@ -1,3 +1,7 @@
+package com.example.multilink.ui.components.home
+
+import android.content.res.Configuration
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -10,11 +14,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddLink
+import androidx.compose.material.icons.filled.FamilyRestroom
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -23,19 +28,27 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.dimensionResource
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.multilink.R
 
 @Composable
 fun HomeBanner(height: Dp, scrollOffset: Int) {
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+
+    val imageRes = if (isLandscape) {
+        R.drawable.promote_poster_horiz2
+    } else {
+        R.drawable.promote_poster
+    }
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -43,92 +56,100 @@ fun HomeBanner(height: Dp, scrollOffset: Int) {
             .clip(RoundedCornerShape(bottomStart = 0.dp, bottomEnd = 0.dp))
     ) {
         Image(
-            painter = painterResource(id = R.drawable.promote_poster),
+            painter = painterResource(id = imageRes),
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = Modifier
                 .fillMaxSize()
-                .graphicsLayer { translationY = scrollOffset * 0.8f })
-    }
-}
-
-@Composable
-fun HomeSectionHeader() {
-    Column(modifier = Modifier.padding(horizontal = dimensionResource(id = R.dimen.padding_extra_large))) {
-        Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.padding_standard)))
-        Text(
-            text = stringResource(id = R.string.home_header),
-            style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.onBackground
+                .graphicsLayer { translationY = scrollOffset * 0.8f }
         )
-        Text(
-            text = stringResource(id = R.string.home_subtitle),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.padding_medium)))
     }
 }
 
 @Composable
 fun EmptySessionState(
-    onCreateClick: () -> Unit, onJoinClick: () -> Unit, modifier: Modifier = Modifier
+    isParental: Boolean,
+    onCreateClick: () -> Unit,
+    onJoinClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = dimensionResource(id = R.dimen.padding_standard))
-            .padding(top = dimensionResource(id = R.dimen.padding_empty_state_top))
-            .shadow(
-                elevation = dimensionResource(id = R.dimen.elevation_card),
-                shape = RoundedCornerShape(dimensionResource(id = R.dimen.corner_card)),
-                clip = false
-            )
-            .background(
-                MaterialTheme.colorScheme.surfaceContainerLow,
-                RoundedCornerShape(dimensionResource(id = R.dimen.corner_card))
-            )
-            .padding(dimensionResource(id = R.dimen.padding_extra_large)),
+            .padding(horizontal = 24.dp),
+        horizontalAlignment = Alignment.Start
     ) {
-        Icon(
-            imageVector = Icons.Default.AddLink,
-            contentDescription = null,
-            modifier = Modifier.size(64.dp),
-            tint = MaterialTheme.colorScheme.primary
-        )
-        Spacer(modifier = Modifier.height(16.dp))
-        Text(
-            text = stringResource(id = R.string.home_empty_state),
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.onSurface
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = stringResource(id = R.string.home_empty_state_subtitle),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(modifier = Modifier.height(24.dp))
+        // 1. Top Section: Icon on Left, Text on Right
         Row(
-            modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            // Join Button (Outlined)
-            OutlinedButton(
-                onClick = onJoinClick,
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary)
+            Box(
+                modifier = Modifier
+                    .size(60.dp)
+                    .background(
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(
+                            alpha = 0.5f
+                        ),
+                        shape = RoundedCornerShape(
+                            32.dp
+                        )
+                    ),
+                contentAlignment = Alignment.Center
             ) {
-                Text(text = stringResource(id = R.string.cd_join_session_fab))
+                Icon(
+                    imageVector = if (isParental) Icons.Default.FamilyRestroom else Icons.Default.AddLink,
+                    contentDescription = null,
+                    modifier = Modifier.size(36.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                )
             }
 
-            // Create Button (Filled)
+            Spacer(modifier = Modifier.width(16.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = if (isParental) "No Parental Sessions" else "No Active Sessions",
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontWeight = FontWeight.Bold
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = if (isParental) "Monitor your family's live locations here." else "Create or join a link to start tracking.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 20.sp
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            OutlinedButton(
+                onClick = onJoinClick,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                shape = RoundedCornerShape(50),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            ) {
+                Text("Join Session", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            }
+
             Button(
                 onClick = onCreateClick,
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                shape = RoundedCornerShape(50)
             ) {
-                Text(text = stringResource(id = R.string.cd_create_session_fab))
+                Text("Create Session", fontWeight = FontWeight.Bold, fontSize = 16.sp)
             }
         }
     }

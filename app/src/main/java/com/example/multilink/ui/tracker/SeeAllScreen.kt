@@ -105,7 +105,6 @@ import com.example.multilink.model.SessionParticipant
 import com.example.multilink.service.LocationService
 import com.example.multilink.ui.components.dialogs.DeleteSessionDialog
 import com.example.multilink.ui.components.dialogs.PauseSessionDialog
-import com.example.multilink.ui.components.dialogs.SessionInfoDialog
 import com.example.multilink.ui.viewmodel.SessionViewModel
 import com.example.multilink.ui.viewmodel.SessionViewModelFactory
 import com.example.multilink.utils.LocationUtils
@@ -129,7 +128,9 @@ import androidx.core.net.toUri
 fun SeeAllScreen(
     sessionId: String,
     onBackClick: () -> Unit,
-    onUserClick: (String) -> Unit,
+    onInfoClick: () -> Unit,
+    onUserInfoClick: (String) -> Unit,
+    onUserClick: (String, Boolean) -> Unit,
     onTrackAllClick: (String) -> Unit,
     onSessionEnded: () -> Unit,
     onSessionPaused: () -> Unit
@@ -180,8 +181,10 @@ fun SeeAllScreen(
     val (showFilterOptions, setShowFilterOptions) = remember { mutableStateOf(false) }
     val (showDeleteDialog, setShowDeleteDialog) = remember { mutableStateOf(false) }
     val (showPauseDialog, setShowPauseDialog) = remember { mutableStateOf(false) }
-    val (showInfoDialog, setShowInfoDialog) = remember { mutableStateOf(false) }
     val (isSearchExpanded, setSearchExpanded) = rememberSaveable { mutableStateOf(false) }
+    val useParental = uiState.sessionData?.sessionType == "Parental" &&
+            (uiState.sessionData?.isLocationHistoryEnabled == true ||
+                    uiState.sessionData?.isRouteTracingEnabled == true)
 
     BackHandler(enabled = isSearchExpanded) {
         setSearchExpanded(false)
@@ -240,10 +243,6 @@ fun SeeAllScreen(
             onConfirm = { setShowPauseDialog(false); viewModel.toggleSessionPause(isPaused) },
             onDismiss = { setShowPauseDialog(false) }
         )
-    }
-
-    if (showInfoDialog && uiState.sessionData != null) {
-        SessionInfoDialog(session = uiState.sessionData!!, onDismiss = { setShowInfoDialog(false) })
     }
 
     Scaffold(
@@ -435,7 +434,8 @@ fun SeeAllScreen(
                                             onClick = {
                                                 setShowMenu(
                                                     false
-                                                ); setShowInfoDialog(true)
+                                                )
+                                                onInfoClick()
                                             })
                                         DropdownMenuItem(
                                             text = { Text("Filter By") },
@@ -548,7 +548,13 @@ fun SeeAllScreen(
                                 uiModel.participant.id, !uiModel.participant.hasArrived
                             )
                         },
-                        onClick = { debounceClick { onUserClick(uiModel.participant.id) } },
+                        onClick = {
+                            debounceClick {
+                                onUserClick(
+                                    uiModel.participant.id, useParental
+                                )
+                            }
+                        },
                         onCallClick = {
                             if (uiModel.phoneNumber.isNotEmpty()) {
                                 val intent = Intent(
@@ -573,8 +579,14 @@ fun SeeAllScreen(
                                 uiModel.participant.id, uiModel.participant.status,
                                 uiModel.participant.name
                             )
-                        }
-
+                        },
+                        onUserInfoClick = {
+                            debounceClick {
+                                onUserInfoClick(
+                                    uiModel.participant.id
+                                )
+                            }
+                        },
                     )
                 }
             }
@@ -704,7 +716,8 @@ fun UserGridCard(
     onClick: () -> Unit,
     onCallClick: () -> Unit,
     onRemoveClick: () -> Unit,
-    onTogglePauseClick: () -> Unit
+    onTogglePauseClick: () -> Unit,
+    onUserInfoClick: () -> Unit
 ) {
     val (expanded, setExpanded) = remember { mutableStateOf(false) }
 
@@ -838,6 +851,21 @@ fun UserGridCard(
                         modifier = Modifier
                             .widthIn(max = dimensionResource(R.dimen.menu_max_width))
                     ) {
+                        DropdownMenuItem(
+                            text = { Text("User Info", fontSize = 14.sp) },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Default.Info, null, Modifier.size(
+                                        dimensionResource(R.dimen.icon_small)
+                                    )
+                                )
+                            },
+                            onClick = { setExpanded(false); onUserInfoClick() },
+                            contentPadding = PaddingValues(
+                                horizontal = dimensionResource(R.dimen.padding_medium),
+                                vertical = 0.dp
+                            )
+                        )
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.action_call), fontSize = 14.sp) },
                             leadingIcon = {

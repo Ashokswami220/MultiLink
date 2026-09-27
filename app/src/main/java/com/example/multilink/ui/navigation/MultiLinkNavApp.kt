@@ -10,6 +10,7 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import com.example.multilink.R
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -41,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -73,7 +75,10 @@ import dev.chrisbanes.haze.haze
 import kotlinx.coroutines.launch
 import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
+import com.example.multilink.ui.main.SettingsScreen
 import com.example.multilink.ui.otherScreens.NotificationDetailScreen
+import com.example.multilink.ui.otherScreens.SessionInfoScreen
+import com.example.multilink.ui.tracker.ParentalTrackingScreen
 import com.example.multilink.ui.tracker.SoloNavigationScreen
 import com.example.multilink.ui.viewmodel.ActivityViewModel
 
@@ -398,8 +403,12 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
                                                         )
                                                     },
                                                     onProfileClick = onProfileClick,
-                                                    onDrawerClick = {},
-                                                    initialJoinCode = startJoinCode
+                                                    initialJoinCode = startJoinCode,
+                                                    onSessionInfoClick = { sessionId ->
+                                                        navController.navigate(
+                                                            "${MultiLinkRoutes.SESSION_INFO}/$sessionId"
+                                                        )
+                                                    },
                                                 )
                                             }
 
@@ -455,7 +464,7 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
                                                         .fillMaxSize()
                                                         .padding(top = topBarHeight)
                                                 ) {
-                                                    ScreenPlaceholder("Settings")
+                                                    SettingsScreen()
                                                 }
                                             }
                                         }
@@ -467,11 +476,20 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
                                         label = "top_bar_alpha"
                                     )
 
+                                    val topBarTitle = when (currentTab) {
+                                        0 -> stringResource(id = R.string.app_name)
+                                        1 -> "Activity"
+                                        2 -> "Recent History"
+                                        3 -> "Settings"
+                                        else -> stringResource(id = R.string.app_name)
+                                    }
+
                                     if (topBarAlpha > 0f) {
                                         MultiLinkTopBar(
+                                            title = topBarTitle,
                                             modifier = Modifier.alpha(topBarAlpha),
-                                            onDrawerClick = {},
-                                            onProfileClick = onProfileClick
+                                            onProfileClick = onProfileClick,
+                                            windowInsets = WindowInsets.statusBars
                                         )
                                     }
                                 }
@@ -518,10 +536,16 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
                         SeeAllScreen(
                             sessionId = sessionId,
                             onBackClick = { navController.popBackStack() },
-                            onUserClick = { userId ->
-                                navController.navigate(
-                                    "${MultiLinkRoutes.DETAIL}/$sessionId/$userId"
-                                )
+                            onUserClick = { uId, useParentalScreen ->
+                                if (useParentalScreen) {
+                                    navController.navigate(
+                                        "${MultiLinkRoutes.PARENTAL_TRACKING}/$sessionId/$uId"
+                                    )
+                                } else {
+                                    navController.navigate(
+                                        "${MultiLinkRoutes.DETAIL}/$sessionId/$uId"
+                                    )
+                                }
                             },
                             onTrackAllClick = { sid ->
                                 navController.navigate(
@@ -529,8 +553,17 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
                                 )
                             },
                             onSessionEnded = handleSessionTerminated,
-                            onSessionPaused = handleSessionPausedKick
-
+                            onSessionPaused = handleSessionPausedKick,
+                            onUserInfoClick = { uId ->
+                                navController.navigate(
+                                    "${MultiLinkRoutes.USER_INFO}/$sessionId/$uId"
+                                )
+                            },
+                            onInfoClick = {
+                                navController.navigate(
+                                    "${MultiLinkRoutes.SESSION_INFO}/$sessionId"
+                                )
+                            }
                         )
                     }
 
@@ -573,16 +606,27 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
                         LiveTrackingScreen(
                             sessionId = sessionId,
                             onBackClick = { navController.popBackStack() },
-                            onUserDetailClick = { userId ->
-                                navController.navigate(
-                                    "${MultiLinkRoutes.DETAIL}/$sessionId/$userId"
-                                )
+                            onUserDetailClick = { uId, useParentalScreen ->
+                                if (useParentalScreen) {
+                                    navController.navigate(
+                                        "${MultiLinkRoutes.PARENTAL_TRACKING}/$sessionId/$uId"
+                                    )
+                                } else {
+                                    navController.navigate(
+                                        "${MultiLinkRoutes.DETAIL}/$sessionId/$uId"
+                                    )
+                                }
                             },
                             onStopSession = {
                                 handleStopSession(sessionId)
                             },
                             onSessionEnded = handleSessionTerminated,
-                            onSessionPaused = handleSessionPausedKick
+                            onSessionPaused = handleSessionPausedKick,
+                            onInfoClick = {
+                                navController.navigate(
+                                    "${MultiLinkRoutes.SESSION_INFO}/$sessionId"
+                                )
+                            }
                         )
                     }
 
@@ -630,7 +674,12 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
                             userId = userId,
                             onBackClick = { navController.popBackStack() },
                             onSessionEnded = handleSessionTerminated,
-                            onSessionPaused = handleSessionPausedKick
+                            onSessionPaused = handleSessionPausedKick,
+                            onUserInfoClick = {
+                                navController.navigate(
+                                    "${MultiLinkRoutes.USER_INFO}/$sessionId/$userId"
+                                )
+                            }
                         )
                     }
 
@@ -670,6 +719,142 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
                         val sessionId = entry.arguments?.getString("sessionId") ?: ""
                         SoloNavigationScreen(
                             sessionId = sessionId,
+                            onBackClick = { navController.popBackStack() }
+                        )
+                    }
+
+                    // PARENTAL TRACKING SCREEN
+                    composable(
+                        route = "${MultiLinkRoutes.PARENTAL_TRACKING}/{sessionId}/{userId}",
+                        arguments = listOf(
+                            navArgument("sessionId") { type = NavType.StringType },
+                            navArgument("userId") { type = NavType.StringType }
+                        ),
+                        enterTransition = {
+                            slideInHorizontally(
+                                initialOffsetX = { it }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        },
+                        exitTransition = {
+                            slideOutHorizontally(
+                                targetOffsetX = { -it / 3 }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        },
+                        popEnterTransition = {
+                            slideInHorizontally(
+                                initialOffsetX = { -it / 3 }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        },
+                        popExitTransition = {
+                            slideOutHorizontally(
+                                targetOffsetX = { it }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        }
+                    ) { entry ->
+                        val sessionId = entry.arguments?.getString("sessionId") ?: ""
+                        val userId = entry.arguments?.getString("userId") ?: ""
+
+                        ParentalTrackingScreen(
+                            sessionId = sessionId,
+                            userId = userId,
+                            onBackClick = { navController.popBackStack() },
+                            onUserInfoClick = {
+                                navController.navigate(
+                                    "${MultiLinkRoutes.USER_INFO}/$sessionId/$userId"
+                                )
+                            }
+                        )
+                    }
+
+                    // SESSION INFO FULL SCREEN
+                    composable(
+                        route = "${MultiLinkRoutes.SESSION_INFO}/{sessionId}",
+                        arguments = listOf(navArgument("sessionId") { type = NavType.StringType }),
+                        enterTransition = {
+                            slideInHorizontally(
+                                initialOffsetX = { it }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        },
+                        exitTransition = {
+                            slideOutHorizontally(
+                                targetOffsetX = { -it / 3 }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        },
+                        popEnterTransition = {
+                            slideInHorizontally(
+                                initialOffsetX = { -it / 3 }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        },
+                        popExitTransition = {
+                            slideOutHorizontally(
+                                targetOffsetX = { it }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        }
+                    ) { entry ->
+                        val sessionId = entry.arguments?.getString("sessionId") ?: ""
+                        SessionInfoScreen(
+                            sessionId = sessionId,
+                            onBackClick = { navController.popBackStack() }
+                        )
+                    }
+
+                    // USER INFO FULL SCREEN
+                    composable(
+                        route = "${MultiLinkRoutes.USER_INFO}/{sessionId}/{userId}",
+                        arguments = listOf(
+                            navArgument("sessionId") { type = NavType.StringType },
+                            navArgument("userId") { type = NavType.StringType }
+                        ),
+                        enterTransition = {
+                            slideInHorizontally(
+                                initialOffsetX = { it }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        },
+                        exitTransition = {
+                            slideOutHorizontally(
+                                targetOffsetX = { -it / 3 }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        },
+                        popEnterTransition = {
+                            slideInHorizontally(
+                                initialOffsetX = { -it / 3 }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        },
+                        popExitTransition = {
+                            slideOutHorizontally(
+                                targetOffsetX = { it }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        }
+                    ) { entry ->
+                        val sessionId = entry.arguments?.getString("sessionId") ?: ""
+                        val userId = entry.arguments?.getString("userId") ?: ""
+                        com.example.multilink.ui.otherScreens.UserInfoScreen(
+                            sessionId = sessionId,
+                            userId = userId,
                             onBackClick = { navController.popBackStack() }
                         )
                     }

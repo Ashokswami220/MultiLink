@@ -51,7 +51,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -140,7 +139,7 @@ fun MasterViewSwitcher(selectedTab: Int, onTabSelected: (Int) -> Unit) {
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 24.dp)
+            .padding(horizontal = 16.dp)
             .height(56.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
@@ -244,7 +243,7 @@ fun DashboardSection(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = minScrollHeight)
-                    .padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 16.dp)
+                    .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp)
             ) {
                 InteractiveSparklineGraph(
                     data = activeData, labels = labels, themeColor = themeColor,
@@ -341,7 +340,7 @@ fun InboxSection(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 32.dp, start = 24.dp, end = 24.dp),
+                            .padding(top = 32.dp, start = 16.dp, end = 16.dp),
                         contentAlignment = Alignment.TopStart
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -407,7 +406,7 @@ fun InboxSection(
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(horizontal = 24.dp)
+                                            .padding(horizontal = 16.dp)
                                             .padding(top = 20.dp, bottom = 4.dp),
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
@@ -578,7 +577,7 @@ fun FeedItemCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 24.dp, end = 24.dp, top = 12.dp, bottom = 12.dp),
+                .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
             verticalAlignment = Alignment.Top
         ) {
             // Icon (Squircle)
@@ -673,7 +672,7 @@ fun FeedItemCard(
         // Sleek separator line
         if (!isLast) {
             HorizontalDivider(
-                modifier = Modifier.padding(start = 88.dp, end = 24.dp),
+                modifier = Modifier.padding(start = 80.dp, end = 16.dp),
                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
                 thickness = 1.dp
             )

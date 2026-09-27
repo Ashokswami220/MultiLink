@@ -12,4 +12,7 @@ object MultiLinkRoutes {
     const val RECENT_DETAIL = "recent_detail"
     const val NOTIFICATION_DETAIL = "notification_detail"
     const val SOLO_NAVIGATION = "solo_navigation"
+    const val SESSION_INFO = "session_info"
+    const val USER_INFO = "user_info"
+    const val PARENTAL_TRACKING = "parental_tracking"
 }

@@ -58,6 +58,22 @@ class SessionViewModel(
     private val _navigationRoute = MutableStateFlow<RouteResult?>(null)
     val navigationRoute: StateFlow<RouteResult?> = _navigationRoute.asStateFlow()
 
+    // Parental "Time Machine" States
+    private val _currentSelectedDate = MutableStateFlow(
+        java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+            .format(java.util.Date())
+    )
+    val currentSelectedDate: StateFlow<String> = _currentSelectedDate.asStateFlow()
+
+    // Holds the raw Map<String, Any> points (lat, lng, timestamp) for the Breadcrumbs
+    private val _historyPoints = MutableStateFlow<List<Map<String, Any>>>(emptyList())
+    val historyPoints: StateFlow<List<Map<String, Any>>> = _historyPoints.asStateFlow()
+
+    // Holds the continuous Mapbox route drawn from the history points
+    private val _historyRoute = MutableStateFlow<List<Point>>(emptyList())
+    val historyRoute: StateFlow<List<Point>> = _historyRoute.asStateFlow()
+
+
     // Observing _uiState directly so we can access the hostId for sorting
     val processedParticipants: StateFlow<List<ParticipantUiModel>> = combine(
         _uiState, userProfileCache, _searchQuery, _filterType, _sortType
@@ -108,6 +124,7 @@ class SessionViewModel(
     val recentSessions: StateFlow<List<RecentSession>> = _recentSessions.asStateFlow()
 
     private var participantsJob: kotlinx.coroutines.Job? = null
+    private var historyJob: kotlinx.coroutines.Job? = null // Job for history listener
     private var isWatchingSession = false
 
     init {
@@ -233,8 +250,33 @@ class SessionViewModel(
         }
     }
 
-    // --- RECENT SESSIONS & INTERNAL LOGIC ---
+    // Fetch History for the Date Picker
+    fun loadHistoryForDate(dateString: String, userId: String) {
+        _currentSelectedDate.value = dateString
+        historyJob?.cancel()
 
+        historyJob = viewModelScope.launch {
+            repository.listenToUserHistoryForDate(sessionId, userId, dateString)
+                .collectLatest { pointsList ->
+                    _historyPoints.value = pointsList
+
+                    // Draw a continuous line using all recorded history points
+                    if (_uiState.value.sessionData?.isRouteTracingEnabled == true && pointsList.isNotEmpty()) {
+                        val route = pointsList.map {
+                            Point.fromLngLat(
+                                (it["lng"] as Number).toDouble(), (it["lat"] as Number).toDouble()
+                            )
+                        }
+                        _historyRoute.value = route
+                    } else {
+                        _historyRoute.value = emptyList()
+                    }
+                }
+        }
+    }
+
+
+    // --- RECENT SESSIONS & INTERNAL LOGIC ---
     private fun fetchRecentSessions() {
         viewModelScope.launch {
             repository.getRecentSessions()
@@ -267,7 +309,7 @@ class SessionViewModel(
                 val now = System.currentTimeMillis()
                 _uiState.update { state ->
                     val refreshedParticipants = state.participants.map { user ->
-                        if (user.status != "Paused" && user.status != "Arrived" && user.lastUpdated > 0 && (now - user.lastUpdated) > 40_000L) {
+                        if (user.status != "Paused" && user.status != "Arrived" && user.lastUpdated > 0 && (now - user.lastUpdated) > 120_000L) {
                             user.copy(status = "Offline")
                         } else user
                     }
@@ -323,7 +365,7 @@ class SessionViewModel(
                                         checkAndFetchMissingProfiles(users)
                                         val now = System.currentTimeMillis()
                                         val checkedUsers = users.map { user ->
-                                            if (user.status != "Paused" && user.status != "Arrived" && user.lastUpdated > 0 && (now - user.lastUpdated) > 60_000L) {
+                                            if (user.status != "Paused" && user.status != "Arrived" && user.lastUpdated > 0 && (now - user.lastUpdated) > 120_000L) {
                                                 user.copy(status = "Offline")
                                             } else user
                                         }

@@ -25,16 +25,27 @@ import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.DatabaseError
+import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.database.ValueEventListener
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import androidx.core.content.edit
+
+enum class TrackingMode {
+    IDLE, SESSION_WATCHED, USER_WATCHED
+}
 
 class LocationService : Service() {
 
@@ -43,6 +54,13 @@ class LocationService : Service() {
     private lateinit var locationCallback: LocationCallback
     private val repository = RealtimeRepository()
     private val auth = FirebaseAuth.getInstance()
+
+    // SharedPreferences to recover session ID when app is swiped away/killed
+    private val prefs by lazy {
+        getSharedPreferences(
+            "MultiLinkServicePrefs", MODE_PRIVATE
+        )
+    }
 
     private var currentSessionId: String? = null
 
@@ -56,25 +74,40 @@ class LocationService : Service() {
     private var isSessionPaused = false
 
     @Volatile
-    private var isCurrentlyHighAccuracy = true
+    private var currentTrackingMode = TrackingMode.IDLE
 
+    private var lastRouteLogTime = 0L
+    private var lastPinLogTime = 0L
+    private var isFirstPin = true
+
+    private var lastValidRouteLoc: Location? = null
+
+    private var heartbeatJob: Job? = null
+
+    @Volatile
+    private var isLocationHistoryEnabled = false
+
+    @Volatile
+    private var historyIntervalMins = 30
+
+    @Volatile
+    private var isRouteTracingEnabled = false
+
+    private var sessionConfigListener: ValueEventListener? = null
     private var gpsReceiver: BroadcastReceiver? = null
-    private val connectedRef = com.google.firebase.database.FirebaseDatabase.getInstance()
+    private val connectedRef = FirebaseDatabase.getInstance()
         .getReference(".info/connected")
-    private var connectionListener: com.google.firebase.database.ValueEventListener? = null
+    private var connectionListener: ValueEventListener? = null
 
     companion object {
         const val ACTION_START = "ACTION_START"
         const val ACTION_STOP = "ACTION_STOP"
         const val EXTRA_SESSION_ID = "EXTRA_SESSION_ID"
-
-        // Extra to tell service if this is a permanent removal
         const val EXTRA_STOP_MODE = "EXTRA_STOP_MODE"
         const val MODE_REMOVE = "REMOVE"
         const val NOTIFICATION_CHANNEL_ID = "location_channel"
         const val NOTIFICATION_ID = 1
 
-        // Expose location to UI directly (for "My Location" blue dot)
         private val _currentLocation = MutableStateFlow<Location?>(null)
         val currentLocation: StateFlow<Location?> = _currentLocation.asStateFlow()
     }
@@ -85,7 +118,6 @@ class LocationService : Service() {
         super.onCreate()
         locationClient = LocationServices.getFusedLocationProviderClient(this)
 
-        // Define what happens when we get a new GPS fix
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 result.lastLocation?.let { location ->
@@ -98,18 +130,16 @@ class LocationService : Service() {
                 }
             }
         }
-        connectionListener = object : com.google.firebase.database.ValueEventListener {
-            override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
+
+        connectionListener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
                 val connected = snapshot.getValue(Boolean::class.java) ?: false
                 if (connected && isServiceActive && !isSessionPaused) {
-                    // Internet is back! Update status to Online
                     currentSessionId?.let { sid ->
                         serviceScope.launch {
                             repository.updateUserStatus(sid, "Online")
-                            // Must re-register disconnect handler every time we reconnect
                             repository.setupDisconnectHandler(sid)
 
-                            // Force a quick ping since we were just offline
                             try {
                                 locationClient.getCurrentLocation(
                                     Priority.PRIORITY_HIGH_ACCURACY, null
@@ -120,14 +150,14 @@ class LocationService : Service() {
                                             uploadLocationToFirebase(sid, loc)
                                         }
                                     }
-                            } catch (e: SecurityException) {
+                            } catch (_: SecurityException) {
                             }
                         }
                     }
                 }
             }
 
-            override fun onCancelled(error: com.google.firebase.database.DatabaseError) {}
+            override fun onCancelled(error: DatabaseError) {}
         }
         connectedRef.addValueEventListener(connectionListener!!)
 
@@ -135,18 +165,15 @@ class LocationService : Service() {
             override fun onReceive(context: Context, intent: Intent) {
                 if (intent.action == android.location.LocationManager.PROVIDERS_CHANGED_ACTION) {
                     val locationManager = context.getSystemService(
-                        Context.LOCATION_SERVICE
+                        LOCATION_SERVICE
                     ) as android.location.LocationManager
                     val isGpsEnabled = locationManager.isProviderEnabled(
                         android.location.LocationManager.GPS_PROVIDER
                     )
-
                     val newStatus = if (isGpsEnabled) "Online" else "Location Off"
 
                     currentSessionId?.let { sid ->
-                        serviceScope.launch {
-                            repository.updateUserStatus(sid, newStatus)
-                        }
+                        serviceScope.launch { repository.updateUserStatus(sid, newStatus) }
                     }
 
                     if (isGpsEnabled && isServiceActive && !isSessionPaused) {
@@ -158,7 +185,7 @@ class LocationService : Service() {
                                         uploadLocationToFirebase(currentSessionId!!, loc)
                                     }
                                 }
-                        } catch (e: SecurityException) {
+                        } catch (_: SecurityException) {
                         }
                     }
                 }
@@ -170,16 +197,43 @@ class LocationService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // App Recovery Logic: If intent is null (service restarted by OS), load ID from SharedPreferences
+        var sessionId = intent?.getStringExtra(EXTRA_SESSION_ID)
+
+        if (sessionId == null && intent == null) {
+            sessionId = prefs.getString("ACTIVE_SESSION_ID", null)
+        }
+
         when (intent?.action) {
-            ACTION_START -> {
-                val sessionId = intent.getStringExtra(EXTRA_SESSION_ID)
+            ACTION_START, null -> {
                 if (sessionId != null) {
                     currentSessionId = sessionId
                     isServiceActive = true
                     shouldUpdateStatusOnStop = true
 
+                    prefs.edit {
+                        putString("ACTIVE_SESSION_ID", sessionId)
+                    }
+
+                    val configRef = FirebaseDatabase.getInstance().reference.child("sessions")
+                        .child(sessionId)
+                    sessionConfigListener = object : ValueEventListener {
+                        override fun onDataChange(snapshot: DataSnapshot) {
+                            isLocationHistoryEnabled = snapshot.child("isLocationHistoryEnabled")
+                                .getValue(Boolean::class.java) ?: false
+                            historyIntervalMins = snapshot.child("historyIntervalMins")
+                                .getValue(Int::class.java) ?: 30
+                            isRouteTracingEnabled = snapshot.child("isRouteTracingEnabled")
+                                .getValue(Boolean::class.java) ?: false
+                        }
+
+                        override fun onCancelled(error: DatabaseError) {}
+                    }
+                    configRef.addValueEventListener(sessionConfigListener!!)
+
                     startForegroundService()
-                    requestLocationUpdates(isCurrentlyHighAccuracy)
+                    requestLocationUpdates(currentTrackingMode)
+                    startHeartbeat()
 
                     try {
                         locationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
@@ -204,23 +258,25 @@ class LocationService : Service() {
                                     repository.listenToSessionWatchers(sessionId),
                                     repository.listenToUserWatchers(sessionId, myUserId)
                                 ) { sessionWatchers, myWatchers ->
-                                    // High Accuracy if ANYONE is on the LiveMap OR looking directly at ME
-                                    sessionWatchers > 0 || myWatchers > 0
+                                    //
+                                    // Multi-Tier Watcher Logic
+                                    when {
+                                        myWatchers > 0 -> TrackingMode.USER_WATCHED
+                                        sessionWatchers > 0 -> TrackingMode.SESSION_WATCHED
+                                        else -> TrackingMode.IDLE
+                                    }
                                 }
-                                    .collectLatest { requiresHighAccuracy ->
-                                        // Only restart the GPS hardware if the mode actually changed
-                                        if (isCurrentlyHighAccuracy != requiresHighAccuracy) {
-                                            isCurrentlyHighAccuracy = requiresHighAccuracy
-                                            // Update the ongoing request only if service is active and not paused
+                                    .collectLatest { newMode ->
+                                        if (currentTrackingMode != newMode) {
+                                            currentTrackingMode = newMode
                                             if (isServiceActive && !isSessionPaused) {
-                                                requestLocationUpdates(requiresHighAccuracy)
+                                                requestLocationUpdates(newMode)
                                             }
                                         }
                                     }
                             }
                         }
 
-                        // 1. Listen for permanent removal/kicks
                         launch {
                             repository.listenForRemoval(sessionId)
                                 .collectLatest { isRemoved ->
@@ -229,12 +285,12 @@ class LocationService : Service() {
                                         shouldUpdateStatusOnStop = false
                                         stopLocationUpdates()
                                         repository.deleteMyNode(sessionId)
+                                        clearSavedSession()
                                         stopSelf()
                                     }
                                 }
                         }
 
-                        // 2. Listen for Global Session Pause
                         launch {
                             repository.listenToSessionStatus(sessionId)
                                 .collectLatest { status ->
@@ -249,64 +305,50 @@ class LocationService : Service() {
                                                 sessionId, "Online"
                                             )
                                         }
-                                        requestLocationUpdates(isCurrentlyHighAccuracy)
+                                        requestLocationUpdates(currentTrackingMode)
                                     }
 
                                     if (status == "Ended") {
                                         isServiceActive = false
                                         shouldUpdateStatusOnStop = false
                                         stopLocationUpdates()
+                                        clearSavedSession()
                                         stopSelf()
                                     }
                                 }
                         }
 
-                        // 3. Listen for Individual User Pause (Admin paused THIS specific user)
                         launch {
                             val userId = auth.currentUser?.uid ?: return@launch
-                            val userRef =
-                                com.google.firebase.database.FirebaseDatabase.getInstance().reference
-                                    .child("sessions")
-                                    .child(sessionId)
-                                    .child("users")
-                                    .child(userId)
-                                    .child("status")
+                            val userRef = FirebaseDatabase.getInstance().reference.child("sessions")
+                                .child(sessionId)
+                                .child("users")
+                                .child(userId)
+                                .child("status")
 
-                            val userStatusListener =
-                                object : com.google.firebase.database.ValueEventListener {
-                                    override fun onDataChange(
-                                        snapshot: com.google.firebase.database.DataSnapshot
-                                    ) {
-                                        val status =
-                                            snapshot.getValue(String::class.java) ?: "Online"
-
-                                        // BATTERY SAVER - Kill service if arrived!
-                                        if (status == "Arrived") {
-                                            isServiceActive = false
-                                            shouldUpdateStatusOnStop =
-                                                false // Already marked arrived
-                                            stopLocationUpdates()
-                                            stopSelf()
-                                            return
-                                        }
-
-                                        if (isSessionPaused) return
-
-                                        if (status == "Paused" && isServiceActive) {
-                                            stopLocationUpdates()
-                                        } else if (status != "Paused" && isServiceActive) {
-                                            // Resume with the adaptive accuracy
-                                            requestLocationUpdates(isCurrentlyHighAccuracy)
-                                        }
+                            val userStatusListener = object : ValueEventListener {
+                                override fun onDataChange(snapshot: DataSnapshot) {
+                                    val status = snapshot.getValue(String::class.java) ?: "Online"
+                                    if (status == "Arrived") {
+                                        isServiceActive = false
+                                        shouldUpdateStatusOnStop = false
+                                        stopLocationUpdates()
+                                        clearSavedSession()
+                                        stopSelf()
+                                        return
                                     }
-
-                                    override fun onCancelled(
-                                        error: com.google.firebase.database.DatabaseError
-                                    ) {
+                                    if (isSessionPaused) return
+                                    if (status == "Paused" && isServiceActive) {
+                                        stopLocationUpdates()
+                                    } else if (status != "Paused" && isServiceActive) {
+                                        requestLocationUpdates(currentTrackingMode)
                                     }
                                 }
+
+                                override fun onCancelled(error: DatabaseError) {}
+                            }
                             userRef.addValueEventListener(userStatusListener)
-                        }///
+                        }
                     }
                 } else {
                     stopSelf()
@@ -318,46 +360,71 @@ class LocationService : Service() {
                 if (mode == MODE_REMOVE) {
                     shouldUpdateStatusOnStop = false
                 }
-
                 isServiceActive = false
-
                 if (shouldUpdateStatusOnStop) {
                     currentSessionId?.let { sid ->
-                        serviceScope.launch {
-                            repository.updateUserStatus(sid, "Offline")
-                        }
+                        serviceScope.launch { repository.updateUserStatus(sid, "Offline") }
                     }
                 }
                 stopLocationUpdates()
+                clearSavedSession()
                 stopSelf()
             }
         }
         return START_STICKY
     }
 
+    //Heartbeat loops every 25 seconds to keep user "Online" even if GPS hasn't moved
+    private fun startHeartbeat() {
+        heartbeatJob?.cancel()
+        heartbeatJob = serviceScope.launch {
+            while (isActive) {
+                delay(25_000L)
+                if (isServiceActive && !isSessionPaused) {
+                    currentSessionId?.let { sid ->
+                        try {
+                            repository.updateUserStatus(sid, "Online")
+                        } catch (_: Exception) {
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun clearSavedSession() {
+        prefs.edit {
+            remove("ACTIVE_SESSION_ID")
+        }
+        heartbeatJob?.cancel()
+    }
+
     @SuppressLint("MissingPermission")
-    private fun requestLocationUpdates(highAccuracy: Boolean) {
+    private fun requestLocationUpdates(mode: TrackingMode) {
         locationClient.removeLocationUpdates(locationCallback)
 
-        val request = if (highAccuracy) {
-            // HIGH POWER MODE: Someone is watching!
-            // Update every 5 seconds, or if they move 2 meters.
-            LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 3000L)
-                .setMinUpdateDistanceMeters(2f)
-                .build()
-        } else {
-            // LOW POWER MODE: Phones are in pockets.
-            // Update every 30 seconds, and only if they move 20+ meters.
-            LocationRequest.Builder(Priority.PRIORITY_BALANCED_POWER_ACCURACY, 30000L)
-                .setMinUpdateDistanceMeters(20f)
-                .build()
+        //3-Tier Adaptive Speed Logic
+        val request = when (mode) {
+            TrackingMode.USER_WATCHED -> {
+                LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 3000L)
+                    .setMinUpdateDistanceMeters(2f)
+                    .build()
+            }
+
+            TrackingMode.SESSION_WATCHED -> {
+                LocationRequest.Builder(Priority.PRIORITY_BALANCED_POWER_ACCURACY, 10000L)
+                    .setMinUpdateDistanceMeters(10f)
+                    .build()
+            }
+
+            TrackingMode.IDLE -> {
+                LocationRequest.Builder(Priority.PRIORITY_BALANCED_POWER_ACCURACY, 30000L)
+                    .setMinUpdateDistanceMeters(30f)
+                    .build()
+            }
         }
 
-        locationClient.requestLocationUpdates(
-            request,
-            locationCallback,
-            Looper.getMainLooper()
-        )
+        locationClient.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
     }
 
     private fun stopLocationUpdates() {
@@ -365,8 +432,6 @@ class LocationService : Service() {
     }
 
     private fun uploadLocationToFirebase(sessionId: String, location: Location) {
-        val user = auth.currentUser ?: return
-
         val batteryStatus: Intent? =
             registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
         val level: Int = batteryStatus?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
@@ -378,16 +443,52 @@ class LocationService : Service() {
         val isCharging =
             status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL
 
+        val now = System.currentTimeMillis()
+        var shouldLogRoute = false
+        var shouldLogPin = false
+
+        //Race Condition: Synchronous check ensures no duplicate pins
+        synchronized(this) {
+            if (isRouteTracingEnabled && (now - lastRouteLogTime > 60_000L)) {
+                var isValidPoint = true
+
+                //Map Jitter: Discard points that imply impossible speed (> 144 km/h)
+                lastValidRouteLoc?.let { lastLoc ->
+                    val distanceMeters = location.distanceTo(lastLoc)
+                    val timeSeconds = (now - lastRouteLogTime) / 1000f
+                    val impliedSpeed = distanceMeters / timeSeconds
+                    if (impliedSpeed > 40f) isValidPoint = false
+                }
+
+                if (isValidPoint) {
+                    shouldLogRoute = true
+                    lastRouteLogTime = now
+                    lastValidRouteLoc = location
+                }
+            }
+
+            val pinIntervalMs = historyIntervalMins * 60 * 1000L
+            if (isLocationHistoryEnabled && (isFirstPin || now - lastPinLogTime > pinIntervalMs)) {
+                shouldLogPin = true
+                lastPinLogTime = now
+                isFirstPin = false
+            }
+        }
+
         serviceScope.launch {
             if (isServiceActive && !isSessionPaused) {
                 repository.updateMyLocation(
-                    sessionId = sessionId,
-                    lat = location.latitude,
-                    lng = location.longitude,
-                    heading = location.bearing,
-                    battery = batteryPct,
-                    isCharging = isCharging,
+                    sessionId = sessionId, lat = location.latitude, lng = location.longitude,
+                    heading = location.bearing, battery = batteryPct, isCharging = isCharging,
                     speed = location.speed
+                )
+
+                // Only log to Firebase if the synchronous check allowed it
+                if (shouldLogRoute) repository.logLocationHistory(
+                    sessionId, location.latitude, location.longitude, isPin = false
+                )
+                if (shouldLogPin) repository.logLocationHistory(
+                    sessionId, location.latitude, location.longitude, isPin = true
                 )
             }
         }
@@ -405,23 +506,16 @@ class LocationService : Service() {
             notificationManager.createNotificationChannel(channel)
         }
 
-        // Clicking notification opens the app
         val intent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
             this, 0, intent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        // Stop Action Button
-        val stopIntent = Intent(this, LocationService::class.java).apply { action = ACTION_STOP }
-        val stopPendingIntent = PendingIntent.getService(
-            this, 1, stopIntent, PendingIntent.FLAG_IMMUTABLE
-        )
-
         val notification = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
             .setContentTitle("MultiLink Active")
             .setContentText("Sharing your live location...")
-            .setSmallIcon(R.mipmap.ic_launcher) // Make sure this icon exists
+            .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .build()
@@ -431,6 +525,7 @@ class LocationService : Service() {
 
     override fun onDestroy() {
         isServiceActive = false
+        heartbeatJob?.cancel()
 
         if (shouldUpdateStatusOnStop) {
             currentSessionId?.let { sid ->
@@ -441,7 +536,15 @@ class LocationService : Service() {
         gpsReceiver?.let {
             try {
                 unregisterReceiver(it)
-            } catch (e: Exception) {
+            } catch (_: Exception) {
+            }
+        }
+
+        currentSessionId?.let { sid ->
+            sessionConfigListener?.let {
+                FirebaseDatabase.getInstance().reference.child("sessions")
+                    .child(sid)
+                    .removeEventListener(it)
             }
         }
 
@@ -450,11 +553,5 @@ class LocationService : Service() {
         super.onDestroy()
         serviceScope.cancel()
         locationClient.removeLocationUpdates(locationCallback)
-    }
-
-    private fun cancel() {
-        if (serviceScope.isActive) {
-            serviceScope.cancel()
-        }
     }
 }

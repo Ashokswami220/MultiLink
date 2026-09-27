@@ -2,6 +2,7 @@ package com.example.multilink.ui.components.session
 
 import android.widget.Toast
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -113,8 +114,10 @@ fun SessionCard(
 
     LaunchedEffect(data) {
         val createdTime = data.createdTimestamp
-        if (createdTime == 0L) {
-            timeLeftString = "${data.durationVal} ${data.durationUnit}"
+        if (createdTime == 0L || data.durationUnit == "Forever") {
+            timeLeftString =
+                if (data.durationUnit == "Forever") "No Limit" else "${data.durationVal} ${data.durationUnit}"
+            exactEndDateTime = if (data.durationUnit == "Forever") "No Expiry" else ""
             return@LaunchedEffect
         }
         val durationVal = data.durationVal.toLongOrNull() ?: 0L
@@ -193,7 +196,7 @@ fun SessionCard(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         ),
-        elevation = CardDefaults.cardElevation(2.dp),
+        elevation = CardDefaults.cardElevation(dimensionResource(R.dimen.elevation_card)),
         onClick = {
             if (isAdmin || !isPaused) {
                 onClick()
@@ -240,7 +243,7 @@ fun SessionCard(
                     Spacer(modifier = Modifier.width(8.dp))
                     Surface(
                         color = statusColor.copy(alpha = 0.1f), shape = RoundedCornerShape(50),
-                        border = androidx.compose.foundation.BorderStroke(
+                        border = BorderStroke(
                             1.dp, statusColor.copy(alpha = 0.3f)
                         )
                     ) {
@@ -265,61 +268,89 @@ fun SessionCard(
                 }
             }
 
-            if (data.joinCode.isNotEmpty() && canShare) {
+            val isParental = data.sessionType == "Parental"
+            if ((data.joinCode.isNotEmpty() && canShare) || isParental || (isAdmin && !data.isSharingAllowed)) {
                 Spacer(modifier = Modifier.height(12.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .clickable {
-                                    clipboardManager.setText(
-                                        AnnotatedString(data.joinCode)
-                                    )
-                                    Toast.makeText(context, "Code Copied", Toast.LENGTH_SHORT)
-                                        .show()
-                                }
-                                .padding(horizontal = 8.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                    // Left side: Join Code
+                    if (data.joinCode.isNotEmpty() && canShare) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            shape = RoundedCornerShape(8.dp)
                         ) {
-                            Text(
-                                text = "Code: ${data.joinCode}",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.SemiBold
-                                ), color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Icon(
-                                Icons.Default.ContentCopy, "Copy", Modifier.size(14.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
+                            Row(
+                                modifier = Modifier
+                                    .clickable {
+                                        clipboardManager.setText(AnnotatedString(data.joinCode))
+                                        Toast.makeText(context, "Code Copied", Toast.LENGTH_SHORT)
+                                            .show()
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Code: ${data.joinCode}",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.SemiBold
+                                    ), color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Icon(
+                                    Icons.Default.ContentCopy, "Copy", Modifier.size(14.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
                         }
                     }
 
-                    if (isAdmin && !data.isSharingAllowed) {
+                    // Right Side: Tags
+                    if ((isAdmin && !data.isSharingAllowed) || isParental) {
                         Spacer(modifier = Modifier.weight(1f))
 
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Outlined.Block,
-                                contentDescription = "Sharing Disabled",
-                                modifier = Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.error
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "Sharing Disabled",
-                                style = MaterialTheme.typography.labelMedium.copy(
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                color = MaterialTheme.colorScheme.error
-                            )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            if (isAdmin && !data.isSharingAllowed) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.Outlined.Block,
+                                        contentDescription = "Sharing Disabled",
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.error
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "Sharing Disabled",
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = FontWeight.Bold
+                                        ),
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
+                            if (isParental) {
+                                Surface(
+                                    color = MaterialTheme.colorScheme.primary,
+                                    shape = RoundedCornerShape(8.dp),
+
+                                    ) {
+                                    Text(
+                                        text = "PARENTAL",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontWeight = FontWeight.ExtraBold,
+                                            fontSize = 11.sp
+                                        ),
+                                        modifier = Modifier.padding(
+                                            horizontal = 8.dp, vertical = 6.dp
+                                        )
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -799,7 +830,7 @@ fun SessionCard(
                         }
 
                         // User Option: Leave is now permanently here for non-hosts!
-                        if (!isAdmin) {
+                        if (!isAdmin && data.isLeaveAllowed) {
                             DropdownMenuItem(
                                 text = {
                                     Text(

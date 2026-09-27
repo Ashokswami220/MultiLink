@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -14,8 +15,11 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import com.example.multilink.repo.RealtimeRepository
 import com.example.multilink.ui.navigation.MultiLinkNavApp
 import com.example.multilink.ui.theme.MultiLinkTheme
+import com.google.android.gms.tasks.OnCompleteListener
+import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -78,6 +82,19 @@ class MainActivity : ComponentActivity() {
             e.printStackTrace()
         }
         enableEdgeToEdge()
+
+        // Fetch FCM Token on App Launch
+        FirebaseMessaging.getInstance().token.addOnCompleteListener(OnCompleteListener { task ->
+            if (!task.isSuccessful) {
+                Log.w("MainActivity", "Fetching FCM registration token failed", task.exception)
+                return@OnCompleteListener
+            }
+            // Get new FCM registration token and save it
+            val token = task.result
+            lifecycleScope.launch {
+                RealtimeRepository().saveFcmToken(token)
+            }
+        })
 
 
         if (!hasPermissions()) {

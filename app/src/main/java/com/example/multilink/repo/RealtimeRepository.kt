@@ -24,12 +24,87 @@ import com.example.multilink.utils.LocationUtils.calculateDistance
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class RealtimeRepository {
 
     private val db = FirebaseDatabase.getInstance().reference
     private val auth = FirebaseAuth.getInstance()
 
+    //  Added isPin and 4-Day Auto-Cleanup
+    suspend fun logLocationHistory(sessionId: String, lat: Double, lng: Double, isPin: Boolean) {
+        val userId = auth.currentUser?.uid ?: return
+        val timestamp = System.currentTimeMillis()
+        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        val dateStr = sdf.format(Date(timestamp))
+
+        val historyRef = db.child("sessions")
+            .child(sessionId)
+            .child("users")
+            .child(userId)
+            .child("history")
+
+        try {
+            // 1. Log the new point
+            historyRef.child(dateStr)
+                .push()
+                .setValue(
+                    mapOf("lat" to lat, "lng" to lng, "timestamp" to timestamp, "isPin" to isPin)
+                )
+                .await()
+
+            // 2. Auto-Cleanup: Delete data older than 4 days
+            val fourDaysAgo = timestamp - (4L * 24 * 60 * 60 * 1000)
+            val snapshot = historyRef.get()
+                .await()
+
+            for (child in snapshot.children) {
+                val nodeDateStr = child.key ?: continue
+                try {
+                    val nodeDate = sdf.parse(nodeDateStr)
+                    if (nodeDate != null && nodeDate.time < fourDaysAgo) {
+                        child.ref.removeValue() // Delete old day folder
+                    }
+                } catch (_: Exception) {
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("Repo", "History log error", e)
+        }
+    }
+
+
+    //  FETCH HISTORY FOR A SPECIFIC DATE
+    fun listenToUserHistoryForDate(
+        sessionId: String, userId: String, dateStr: String
+    ): Flow<List<Map<String, Any>>> = callbackFlow {
+        val ref = db.child("sessions")
+            .child(sessionId)
+            .child("users")
+            .child(userId)
+            .child("history")
+            .child(dateStr)
+
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val points = mutableListOf<Map<String, Any>>()
+                for (child in snapshot.children) {
+                    val map = child.value as? Map<String, Any>
+                    if (map != null) points.add(map)
+                }
+                // Sort by timestamp so the route draws in the correct order
+                trySend(points.sortedBy { (it["timestamp"] as? Number)?.toLong() ?: 0L })
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                close(error.toException())
+            }
+        }
+        ref.addValueEventListener(listener)
+        awaitClose { ref.removeEventListener(listener) }
+    }
 
     fun listenToSessionStatus(sessionId: String): Flow<String> = callbackFlow {
         val ref = db.child("sessions")
@@ -46,6 +121,20 @@ class RealtimeRepository {
         }
         ref.addValueEventListener(listener)
         awaitClose { ref.removeEventListener(listener) }
+    }
+
+    // ⭐ ADDED: Save the FCM Device Token so we can target this specific phone
+    suspend fun saveFcmToken(token: String) {
+        val userId = auth.currentUser?.uid ?: return
+        try {
+            db.child("users")
+                .child(userId)
+                .child("fcmToken")
+                .setValue(token)
+                .await()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     suspend fun getGlobalUserProfile(userId: String): Map<String, String>? {
@@ -365,7 +454,12 @@ class RealtimeRepository {
             "durationUnit" to session.durationUnit,
             "maxPeople" to session.maxPeople,
             "isSharingAllowed" to session.isSharingAllowed,
-            "isArrivalTrackingEnabled" to session.isArrivalTrackingEnabled
+            "isArrivalTrackingEnabled" to session.isArrivalTrackingEnabled,
+            "sessionType" to session.sessionType,
+            "isLeaveAllowed" to session.isLeaveAllowed,
+            "isLocationHistoryEnabled" to session.isLocationHistoryEnabled,
+            "historyIntervalMins" to session.historyIntervalMins,
+            "isRouteTracingEnabled" to session.isRouteTracingEnabled
         )
 
         return try {
@@ -492,6 +586,14 @@ class RealtimeRepository {
                     try {
                         val sessionId = child.key ?: continue
 
+                        val hostId = child.child("hostId")
+                            .getValue(String::class.java)
+
+                        if (hostId.isNullOrEmpty()) {
+                            child.ref.removeValue()
+                            continue
+                        }
+
                         val created = child.child("created")
                             .getValue(Long::class.java) ?: 0L
                         val durationVal = child.child("durationVal")
@@ -499,26 +601,28 @@ class RealtimeRepository {
                         val durationUnit = child.child("durationUnit")
                             .getValue(String::class.java) ?: "Hrs"
 
-                        val durationMillis = if (durationUnit == "Hrs") {
-                            TimeUnit.HOURS.toMillis(durationVal.toLongOrNull() ?: 2)
-                        } else {
-                            TimeUnit.DAYS.toMillis(durationVal.toLongOrNull() ?: 1)
-                        }
-
-                        val endTime = created + durationMillis
-                        if (System.currentTimeMillis() > endTime) {
-                            val hostId = child.child("hostId")
-                                .getValue(String::class.java) ?: ""
-                            if (hostId == userId) {
-                                CoroutineScope(Dispatchers.IO).launch {
-                                    stopSession(sessionId, "Time Expired")
-                                }
+                        if (durationUnit != "Forever") {
+                            val durationMillis = if (durationUnit == "Hrs") {
+                                TimeUnit.HOURS.toMillis(durationVal.toLongOrNull() ?: 2)
+                            } else {
+                                TimeUnit.DAYS.toMillis(durationVal.toLongOrNull() ?: 1)
                             }
-                            continue
+
+                            val endTime = created + durationMillis
+                            if (System.currentTimeMillis() > endTime) {
+                                if (hostId == userId) {
+                                    CoroutineScope(Dispatchers.IO).launch {
+                                        stopSession(sessionId, "Time Expired")
+                                        db.child("sessions")
+                                            .child(sessionId)
+                                            .removeValue()
+                                            .await()
+                                    }
+                                }
+                                continue
+                            }
                         }
 
-                        val hostId = child.child("hostId")
-                            .getValue(String::class.java) ?: ""
                         val isParticipant = child.child("users")
                             .child(userId)
                             .child("id")
@@ -578,7 +682,19 @@ class RealtimeRepository {
                                             "isArrivalTrackingEnabled"
                                         )
                                             .getValue(Boolean::class.java) ?: false,
-                                        activeUsers = userCount
+                                        activeUsers = userCount,
+                                        sessionType = child.child("sessionType")
+                                            .getValue(String::class.java) ?: "Standard",
+                                        isLeaveAllowed = child.child("isLeaveAllowed")
+                                            .getValue(Boolean::class.java) ?: true,
+                                        isLocationHistoryEnabled = child.child(
+                                            "isLocationHistoryEnabled"
+                                        )
+                                            .getValue(Boolean::class.java) ?: false,
+                                        historyIntervalMins = child.child("historyIntervalMins")
+                                            .getValue(Int::class.java) ?: 30,
+                                        isRouteTracingEnabled = child.child("isRouteTracingEnabled")
+                                            .getValue(Boolean::class.java) ?: false
                                     )
                                 )
                             }
@@ -616,7 +732,8 @@ class RealtimeRepository {
                 "heading" to 0f,
                 "batteryLevel" to 100,
                 "isCharging" to false,
-                "lastUpdated" to System.currentTimeMillis()
+                "lastUpdated" to System.currentTimeMillis(),
+                "joinedAt" to System.currentTimeMillis()
             )
 
             db.child("sessions")
@@ -678,7 +795,12 @@ class RealtimeRepository {
             "isUsersVisible" to session.isUsersVisible,
             "isSharingAllowed" to session.isSharingAllowed,
             "isHostSharing" to session.isHostSharing,
-            "isArrivalTrackingEnabled" to session.isArrivalTrackingEnabled
+            "isArrivalTrackingEnabled" to session.isArrivalTrackingEnabled,
+            "sessionType" to session.sessionType,
+            "isLeaveAllowed" to session.isLeaveAllowed,
+            "isLocationHistoryEnabled" to session.isLocationHistoryEnabled,
+            "historyIntervalMins" to session.historyIntervalMins,
+            "isRouteTracingEnabled" to session.isRouteTracingEnabled
         )
         db.child("sessions")
             .child(session.id)

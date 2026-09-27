@@ -1,12 +1,14 @@
 package com.example.multilink.ui.tracker
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -101,7 +103,6 @@ import com.example.multilink.ui.components.SessionMapContent
 import com.example.multilink.ui.components.dialogs.ArrivedToggleDialog
 import com.example.multilink.ui.components.dialogs.DeleteSessionDialog
 import com.example.multilink.ui.components.dialogs.PauseSessionDialog
-import com.example.multilink.ui.components.dialogs.SessionInfoDialog
 import com.example.multilink.ui.components.dialogs.TooFarDialog
 import com.example.multilink.ui.viewmodel.ParticipantUiModel
 import com.example.multilink.ui.viewmodel.SessionUiEvent
@@ -126,7 +127,8 @@ enum class SortType {
 fun LiveTrackingScreen(
     sessionId: String,
     onBackClick: () -> Unit,
-    onUserDetailClick: (String) -> Unit,
+    onInfoClick: () -> Unit,
+    onUserDetailClick: (String, Boolean) -> Unit,
     onStopSession: () -> Unit,
     onSessionEnded: () -> Unit,
     onSessionPaused: () -> Unit
@@ -142,6 +144,9 @@ fun LiveTrackingScreen(
     val currentUserData = uiState.participants.find { it.id == uiState.currentUserId }
     val hasArrived = currentUserData?.hasArrived ?: false
     val processedParticipants by viewModel.processedParticipants.collectAsState()
+    val useParental = uiState.sessionData?.sessionType == "Parental" &&
+            (uiState.sessionData?.isLocationHistoryEnabled == true ||
+                    uiState.sessionData?.isRouteTracingEnabled == true)
 
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -162,7 +167,6 @@ fun LiveTrackingScreen(
     // Dialog States
     val (showDeleteDialog, setShowDeleteDialog) = remember { mutableStateOf(false) }
     val (showPauseDialog, setShowPauseDialog) = remember { mutableStateOf(false) }
-    val (showInfoDialog, setShowInfoDialog) = remember { mutableStateOf(false) }
     val (showTooFarDialog, setShowTooFarDialog) = remember { mutableStateOf(false) }
     val (arrivedDialogState, setArrivedDialogState) = remember { mutableStateOf<Boolean?>(null) }
 
@@ -282,10 +286,6 @@ fun LiveTrackingScreen(
         )
     }
 
-    if (showInfoDialog && uiState.sessionData != null) {
-        SessionInfoDialog(session = uiState.sessionData!!, onDismiss = { setShowInfoDialog(false) })
-    }
-
     if (showTooFarDialog) {
         TooFarDialog(
             distanceMeters = distanceRemaining,
@@ -299,6 +299,19 @@ fun LiveTrackingScreen(
             onConfirm = {
                 setArrivedDialogState(null)
                 viewModel.toggleUserArrived(uiState.currentUserId, isArriving)
+
+                // If they hit Undo, wake the location service back up!
+                if (!isArriving) {
+                    val serviceIntent = Intent(context, LocationService::class.java).apply {
+                        action = LocationService.ACTION_START
+                        putExtra(LocationService.EXTRA_SESSION_ID, sessionId)
+                    }
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                        context.startForegroundService(serviceIntent)
+                    } else {
+                        context.startService(serviceIntent)
+                    }
+                }
             },
             onDismiss = { setArrivedDialogState(null) }
         )
@@ -357,7 +370,7 @@ fun LiveTrackingScreen(
                     },
                     onDeleteClick = { setShowDeleteDialog(true) },
                     onPauseClick = { setShowPauseDialog(true) },
-                    onInfoClick = { setShowInfoDialog(true) },
+                    onInfoClick = { onInfoClick() },
                     modifier = Modifier.padding(horizontal = 4.dp)
                 )
             }
@@ -446,7 +459,7 @@ fun LiveTrackingScreen(
                         userLocations = userLocations.map { it.second to it.first },
                         destination = uiState.endPoint,
                         isPortrait = true, onFocusUser = { focusTarget = it },
-                        onOpenDetails = onUserDetailClick
+                        onOpenDetails = { uId -> onUserDetailClick(uId, useParental) }
                     )
                 }
             }
@@ -463,7 +476,8 @@ fun LiveTrackingScreen(
                         modifier = Modifier,
                         userLocations = userLocations.map { it.second to it.first },
                         destination = uiState.endPoint, isPortrait = false,
-                        onFocusUser = { focusTarget = it }, onOpenDetails = onUserDetailClick
+                        onFocusUser = { focusTarget = it },
+                        onOpenDetails = { uId -> onUserDetailClick(uId, useParental) }
                     )
                 }
             }
@@ -734,13 +748,24 @@ fun LiveBottomSummary(
                     // Users List
                     LazyRow(
                         modifier = Modifier.fillMaxWidth(),
-                        contentPadding = PaddingValues(end = 8.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Start
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         itemsIndexed(sortedUserLocations) { index, (uiModel, point) ->
                             val userPhoto = uiModel.photoUrl
                             val user = uiModel.participant
+
+                            val infiniteTransition = rememberInfiniteTransition(label = "bounce")
+                            val bounceOffset by infiniteTransition.animateFloat(
+                                initialValue = 0f,
+                                targetValue = if (user.status == "Online" && !user.hasArrived) -8f else 0f,
+                                animationSpec = infiniteRepeatable(
+                                    animation = tween(1000, easing = FastOutSlowInEasing),
+                                    repeatMode = RepeatMode.Reverse
+                                ),
+                                label = "bounceOffset"
+                            )
 
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Column(
@@ -753,6 +778,7 @@ fun LiveBottomSummary(
                                             )
                                         }
                                         .padding(horizontal = 8.dp)
+                                        .graphicsLayer { translationY = bounceOffset }
                                 ) {
                                     Box {
                                         Surface(
@@ -787,18 +813,37 @@ fun LiveBottomSummary(
                                         maxLines = 1
                                     )
 
-                                    val distText = if (destination != null) {
-                                        LocationUtils.calculateDistance(point, destination)
-                                    } else "--"
+                                    // Show "Reached" icon if they arrived, otherwise show distance
+                                    if (user.hasArrived) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                Icons.Default.TaskAlt, null,
+                                                modifier = Modifier.size(12.dp),
+                                                tint = Color(0xFF4CAF50)
+                                            )
+                                            Spacer(modifier = Modifier.width(2.dp))
+                                            Text(
+                                                text = "Reached",
+                                                style = MaterialTheme.typography.labelSmall.copy(
+                                                    fontSize = 9.sp, color = Color(0xFF4CAF50)
+                                                ),
+                                                maxLines = 1
+                                            )
+                                        }
+                                    } else {
+                                        val distText = if (destination != null) {
+                                            LocationUtils.calculateDistance(point, destination)
+                                        } else "--"
 
-                                    Text(
-                                        text = distText,
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            fontSize = 9.sp,
-                                            color = MaterialTheme.colorScheme.secondary
-                                        ),
-                                        maxLines = 1
-                                    )
+                                        Text(
+                                            text = distText,
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                fontSize = 9.sp,
+                                                color = MaterialTheme.colorScheme.secondary
+                                            ),
+                                            maxLines = 1
+                                        )
+                                    }
                                 }
 
                                 if (index < sortedUserLocations.lastIndex) {

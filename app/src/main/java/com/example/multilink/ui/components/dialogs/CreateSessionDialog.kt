@@ -6,6 +6,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -22,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Map
@@ -33,6 +35,8 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.MyLocation
+import androidx.compose.material.icons.outlined.PinDrop
+import androidx.compose.material.icons.outlined.Route
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -64,6 +68,7 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CreateSessionDialog(
+    isParental: Boolean = false,
     onDismiss: () -> Unit,
     onSuccess: (SessionData, Boolean) -> Unit,
     existingSession: SessionData? = null
@@ -71,7 +76,10 @@ fun CreateSessionDialog(
     val scope = rememberCoroutineScope()
     val shakeOffset = remember { Animatable(0f) }
     val isDark = isSystemInDarkTheme()
-    val pagerState = rememberPagerState(pageCount = { 2 })
+
+    val totalPages = if (isParental) 3 else 2
+    val pagerState = rememberPagerState(pageCount = { totalPages })
+
     val context = LocalContext.current
 
     val inputSurfaceColor =
@@ -84,8 +92,16 @@ fun CreateSessionDialog(
     var isPeopleError by remember { mutableStateOf(false) }
     var fromLoc by rememberSaveable { mutableStateOf("") }
     var toLoc by rememberSaveable { mutableStateOf("") }
-    var isHours by rememberSaveable { mutableStateOf(true) }
-    var durationVal by rememberSaveable { mutableStateOf("2") }
+    var durationMode by rememberSaveable {
+        mutableIntStateOf(
+            when (existingSession?.durationUnit) {
+                "Hrs" -> if (isParental) 1 else 0
+                "Forever" -> 2
+                else -> 1 // Days
+            }
+        )
+    }
+    var durationVal by rememberSaveable { mutableStateOf(if (isParental) "1" else "10") }
     var isDurationExpanded by rememberSaveable { mutableStateOf(false) }
     var peopleText by rememberSaveable { mutableStateOf("5") }
     var mapSelectionMode by rememberSaveable { mutableStateOf<String?>(null) }
@@ -93,7 +109,22 @@ fun CreateSessionDialog(
     var isUsersVisible by rememberSaveable { mutableStateOf(true) }
     var isSharingAllowed by rememberSaveable { mutableStateOf(true) }
     var isArrivalTrackingEnabled by rememberSaveable { mutableStateOf(false) }
-
+    var isLeaveAllowed by rememberSaveable { mutableStateOf(true) }
+    var isLocationHistoryEnabled by rememberSaveable {
+        mutableStateOf(
+            existingSession?.isLocationHistoryEnabled ?: false
+        )
+    }
+    var historyIntervalMins by rememberSaveable {
+        mutableIntStateOf(
+            existingSession?.historyIntervalMins ?: 30
+        )
+    }
+    var isRouteTracingEnabled by rememberSaveable {
+        mutableStateOf(
+            existingSession?.isRouteTracingEnabled ?: false
+        )
+    }
 
     var fromPoint by remember(existingSession) {
         mutableStateOf(
@@ -117,12 +148,12 @@ fun CreateSessionDialog(
             fromLoc = existingSession.fromLocation
             toLoc = existingSession.toLocation
             durationVal = existingSession.durationVal
-            isHours = existingSession.durationUnit == "Hrs"
             peopleText = existingSession.maxPeople
             isUsersVisible = existingSession.isUsersVisible
             isSharingAllowed = existingSession.isSharingAllowed
             isSharingMyLocation = existingSession.isHostSharing
             isArrivalTrackingEnabled = existingSession.isArrivalTrackingEnabled
+            isLeaveAllowed = existingSession.isLeaveAllowed
             if ((existingSession.startLat ?: 0.0) != 0.0) {
                 fromPoint = Point.fromLngLat(existingSession.startLng!!, existingSession.startLat!!)
             }
@@ -133,20 +164,21 @@ fun CreateSessionDialog(
             title = ""
             fromLoc = ""
             toLoc = ""
-            durationVal = "2"
-            isHours = true
+            durationVal = if (isParental) "1" else "10"
+            durationMode = if (isParental) 1 else 0
             peopleText = "5"
             isUsersVisible = true
             isSharingAllowed = true
             isSharingMyLocation = true
             isArrivalTrackingEnabled = false
+            isLeaveAllowed = true
             fromPoint = null
             toPoint = null
         }
     }
 
-    val durationOptions = remember(isHours) {
-        if (isHours) (1..24).map { it.toString() } else (1..3).map { it.toString() }
+    val durationOptions = remember(durationMode) {
+        if (durationMode == 0) (1..24).map { it.toString() } else (1..3).map { it.toString() }
     }
 
     fun triggerShake() {
@@ -205,8 +237,15 @@ fun CreateSessionDialog(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        val headerText = if (existingSession != null) "Edit Session"
+                        else when (pagerState.currentPage) {
+                            0 -> "New Session"
+                            1 -> if (isParental) "Parental Controls" else "Advanced Settings"
+                            else -> "Advanced Settings"
+                        }
+
                         Text(
-                            text = if (existingSession != null) "Edit Session" else if (pagerState.currentPage == 0) "New Session" else "Advanced Settings",
+                            text = headerText,
                             style = MaterialTheme.typography.headlineSmall.copy(
                                 fontWeight = FontWeight.Bold
                             ),
@@ -304,7 +343,7 @@ fun CreateSessionDialog(
                                 }
                                 Spacer(modifier = Modifier.height(24.dp))
 
-                                // Duration
+                                // Duration logic dynamically swaps based on Parental Mode
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Surface(
                                         shape = RoundedCornerShape(50),
@@ -312,85 +351,133 @@ fun CreateSessionDialog(
                                         modifier = Modifier.height(50.dp)
                                     ) {
                                         Row(Modifier.padding(4.dp)) {
-                                            Box(
-                                                Modifier
-                                                    .clip(RoundedCornerShape(50))
-                                                    .background(
-                                                        if (isHours) MaterialTheme.colorScheme.primary else Color.Transparent
-                                                    )
-                                                    .clickable {
-                                                        HapticHelper.trigger(
-                                                            context, HapticHelper.Type.MEDIUM
+                                            if (!isParental) {
+                                                Box(
+                                                    Modifier
+                                                        .clip(RoundedCornerShape(50))
+                                                        .background(
+                                                            if (durationMode == 0) MaterialTheme.colorScheme.primary else Color.Transparent
                                                         )
-                                                        isHours = true; durationVal = "2"
-                                                    }
-                                                    .padding(horizontal = 24.dp, vertical = 10.dp)
-                                            ) {
-                                                Text(
-                                                    "Hrs",
-                                                    color = if (isHours) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-                                                    fontWeight = FontWeight.Bold
-                                                )
+                                                        .clickable {
+                                                            HapticHelper.trigger(
+                                                                context, HapticHelper.Type.MEDIUM
+                                                            )
+                                                            durationMode = 0; durationVal = "10"
+                                                        }
+                                                        .padding(
+                                                            horizontal = 24.dp, vertical = 10.dp
+                                                        )
+                                                ) {
+                                                    Text(
+                                                        "Hrs",
+                                                        color = if (durationMode == 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
                                             }
                                             Box(
                                                 Modifier
                                                     .clip(RoundedCornerShape(50))
                                                     .background(
-                                                        if (!isHours) MaterialTheme.colorScheme.primary else Color.Transparent
+                                                        if (durationMode == 1) MaterialTheme.colorScheme.primary else Color.Transparent
                                                     )
                                                     .clickable {
                                                         HapticHelper.trigger(
                                                             context, HapticHelper.Type.MEDIUM
                                                         )
-                                                        isHours = false; durationVal = "1"
+                                                        durationMode = 1; durationVal = "1"
                                                     }
-                                                    .padding(horizontal = 24.dp, vertical = 10.dp)
+                                                    .padding(
+                                                        horizontal = if (isParental) 24.dp else 16.dp,
+                                                        vertical = 10.dp
+                                                    )
                                             ) {
                                                 Text(
                                                     "Days",
-                                                    color = if (!isHours) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                                                    color = if (durationMode == 1) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
                                                     fontWeight = FontWeight.Bold
                                                 )
                                             }
+                                            if (isParental) {
+                                                Box(
+                                                    Modifier
+                                                        .clip(RoundedCornerShape(50))
+                                                        .background(
+                                                            if (durationMode == 2) MaterialTheme.colorScheme.primary else Color.Transparent
+                                                        )
+                                                        .clickable {
+                                                            HapticHelper.trigger(
+                                                                context, HapticHelper.Type.MEDIUM
+                                                            )
+                                                            durationMode = 2; durationVal = "∞"
+                                                        }
+                                                        .padding(
+                                                            horizontal = 16.dp, vertical = 10.dp
+                                                        )
+                                                ) {
+                                                    Text(
+                                                        "No Limit",
+                                                        color = if (durationMode == 2) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
+
                                     Spacer(Modifier.width(12.dp))
+
                                     ExposedDropdownMenuBox(
-                                        expanded = isDurationExpanded,
+                                        expanded = isDurationExpanded && durationMode != 2,
                                         onExpandedChange = {
-                                            isDurationExpanded = !isDurationExpanded
+                                            if (durationMode != 2) isDurationExpanded =
+                                                !isDurationExpanded
                                         },
                                         modifier = Modifier.weight(1f)
                                     ) {
                                         OutlinedTextField(
-                                            value = durationVal,
+                                            value = if (durationMode == 2) "∞" else durationVal,
                                             onValueChange = {},
                                             readOnly = true,
+                                            enabled = durationMode != 2,
                                             trailingIcon = {
                                                 ExposedDropdownMenuDefaults.TrailingIcon(
                                                     expanded = isDurationExpanded
                                                 )
                                             },
-                                            modifier = Modifier.menuAnchor(
-                                                ExposedDropdownMenuAnchorType.PrimaryNotEditable
-                                            ),
+                                            modifier = Modifier
+                                                .menuAnchor(
+                                                    ExposedDropdownMenuAnchorType.PrimaryNotEditable
+                                                )
+                                                .fillMaxWidth(),
                                             shape = RoundedCornerShape(12.dp),
                                             colors = OutlinedTextFieldDefaults.colors(
                                                 unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                                                focusedContainerColor = Color.Transparent
+                                                focusedContainerColor = Color.Transparent,
+                                                disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(
+                                                    alpha = 0.3f
+                                                ),
+                                                disabledBorderColor = MaterialTheme.colorScheme.outline.copy(
+                                                    alpha = 0.2f
+                                                ),
+                                                disabledTextColor = MaterialTheme.colorScheme.onSurface.copy(
+                                                    alpha = 0.4f
+                                                ),
+                                                disabledTrailingIconColor = MaterialTheme.colorScheme.onSurface.copy(
+                                                    alpha = 0.4f
+                                                )
                                             )
                                         )
                                         DropdownMenu(
-                                            expanded = isDurationExpanded,
+                                            expanded = isDurationExpanded && durationMode != 2,
                                             onDismissRequest = { isDurationExpanded = false },
                                             modifier = Modifier.heightIn(max = 250.dp)
                                         ) {
                                             durationOptions.forEach { option ->
                                                 DropdownMenuItem(
-                                                    text = { Text(option) },
-                                                    onClick = {
-                                                        durationVal = option; isDurationExpanded =
-                                                        false
+                                                    text = { Text(option) }, onClick = {
+                                                        durationVal =
+                                                            option; isDurationExpanded = false
                                                     })
                                             }
                                         }
@@ -399,6 +486,8 @@ fun CreateSessionDialog(
                                 Spacer(modifier = Modifier.height(12.dp))
 
                                 // Participants
+                                val maxLimit = if (isParental) 10 else 50
+
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     OutlinedTextField(
                                         value = peopleText,
@@ -407,7 +496,7 @@ fun CreateSessionDialog(
                                             if (input.all { c -> c.isDigit() }) {
                                                 val num = input.toIntOrNull()
                                                 peopleText =
-                                                    if (num == null) input else if (num <= 50) input else "50"
+                                                    if (num == null) input else if (num <= maxLimit) input else maxLimit.toString()
                                             }
                                         },
                                         label = { Text("Participants") },
@@ -440,7 +529,8 @@ fun CreateSessionDialog(
                                     RepeatingIconButton(
                                         onClick = {
                                             val n = peopleText.toIntOrNull()
-                                                ?: 0; if (n < 50) peopleText = (n + 1).toString()
+                                                ?: 0; if (n < maxLimit) peopleText =
+                                            (n + 1).toString()
                                         },
                                         containerColor = MaterialTheme.colorScheme.primary,
                                         contentColor = MaterialTheme.colorScheme.onPrimary
@@ -448,8 +538,142 @@ fun CreateSessionDialog(
                                         Icon(Icons.Default.Add, null)
                                     }
                                 }
+                            }
+                            // Step 2 : Parental
+                            else if (isParental && page == 1) {
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                SettingToggleCard(
+                                    "Location History (Pins)", "Save locations to timeline",
+                                    Icons.Outlined.PinDrop,
+                                    isLocationHistoryEnabled,
+                                    {
+                                        isLocationHistoryEnabled = it
+                                        if (!it) isRouteTracingEnabled =
+                                            false // Route needs history
+                                    },
+                                    checkedColor = if (isDark) Color(0xFF3F51B5).copy(
+                                        alpha = 0.3f
+                                    ) else Color(0xFFE8EAF6),
+                                    iconColor = Color(0xFF3F51B5)
+                                )
+
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 12.dp, bottom = 12.dp)
+                                ) {
+                                    Text(
+                                        "Save location every:",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (isLocationHistoryEnabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface.copy(
+                                            alpha = 0.38f
+                                        ),
+                                        modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+                                    )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        listOf(10, 20, 30).forEach { mins ->
+                                            val isSelected = historyIntervalMins == mins
+
+                                            val containerColor = when {
+                                                !isLocationHistoryEnabled -> inputSurfaceColor.copy(
+                                                    alpha = 0.4f
+                                                )
+
+                                                isSelected -> Color(0xFF3F51B5)
+                                                else -> inputSurfaceColor
+                                            }
+
+                                            val textColor = when {
+                                                !isLocationHistoryEnabled -> MaterialTheme.colorScheme.onSurface.copy(
+                                                    alpha = 0.38f
+                                                )
+
+                                                isSelected -> Color.White
+                                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                            }
+
+                                            val borderColor = when {
+                                                !isLocationHistoryEnabled -> MaterialTheme.colorScheme.outlineVariant.copy(
+                                                    alpha = 0.3f
+                                                )
+
+                                                !isSelected -> MaterialTheme.colorScheme.outlineVariant
+                                                else -> null
+                                            }
+
+                                            Surface(
+                                                onClick = {
+                                                    if (isLocationHistoryEnabled) {
+                                                        historyIntervalMins = mins
+                                                        HapticHelper.trigger(
+                                                            context, HapticHelper.Type.LIGHT
+                                                        )
+                                                    }
+                                                },
+                                                shape = RoundedCornerShape(8.dp),
+                                                color = containerColor,
+                                                border = if (borderColor != null) BorderStroke(
+                                                    1.dp, borderColor
+                                                ) else null,
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .height(40.dp)
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Text(
+                                                        "$mins min",
+                                                        style = MaterialTheme.typography.labelMedium.copy(
+                                                            fontWeight = FontWeight.Bold
+                                                        ),
+                                                        color = textColor
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(5.dp))
+                                HorizontalDivider(
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(
+                                        alpha = 0.5f
+                                    )
+                                )
+                                Spacer(modifier = Modifier.height(15.dp))
+
+                                SettingToggleCard(
+                                    "Route Tracing", "Draw paths (High battery usage)",
+                                    Icons.Outlined.Route,
+                                    isRouteTracingEnabled,
+                                    {
+                                        isRouteTracingEnabled = it
+                                        if (it) isLocationHistoryEnabled =
+                                            true // Tracing forces history on
+                                    },
+                                    checkedColor = if (isDark) Color(0xFF009688).copy(
+                                        alpha = 0.3f
+                                    ) else Color(0xFFE0F2F1),
+                                    iconColor = Color(0xFF009688)
+                                )
+
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                // Moved to Parental Controls Page
+                                SettingToggleCard(
+                                    "Allow users to leave",
+                                    "If disabled, users cannot leave by themselves",
+                                    Icons.AutoMirrored.Filled.ExitToApp,
+                                    isLeaveAllowed, { isLeaveAllowed = it },
+                                    checkedColor = Color(0xFFE91E63).copy(
+                                        alpha = if (isDark) 0.15f else 0.1f
+                                    ),
+                                    iconColor = Color(0xFFE91E63)
+                                )
                             } else {
-                                // === STEP 2 ===
                                 Spacer(modifier = Modifier.height(8.dp))
                                 SettingToggleCard(
                                     "Share my location",
@@ -459,9 +683,7 @@ fun CreateSessionDialog(
                                     { isSharingMyLocation = it },
                                     if (isDark) MaterialTheme.colorScheme.primaryContainer.copy(
                                         0.7f
-                                    ) else MaterialTheme.colorScheme.primaryContainer.copy(
-                                        0.5f
-                                    ),
+                                    ) else MaterialTheme.colorScheme.primaryContainer.copy(0.5f),
                                     MaterialTheme.colorScheme.primary
                                 )
                                 Spacer(modifier = Modifier.height(16.dp))
@@ -485,34 +707,35 @@ fun CreateSessionDialog(
                                     { isSharingAllowed = it },
                                     if (isDark) MaterialTheme.colorScheme.secondaryContainer.copy(
                                         0.7f
-                                    )
-                                    else MaterialTheme.colorScheme.secondaryContainer,
+                                    ) else MaterialTheme.colorScheme.secondaryContainer,
                                     MaterialTheme.colorScheme.secondary
                                 )
-                                Spacer(modifier = Modifier.height(16.dp))
-                                // Destination Check-In Toggle
-                                SettingToggleCard(
-                                    "Destination Check-In",
-                                    "Users can mark arrived when near",
-                                    Icons.Default.TaskAlt,
-                                    isArrivalTrackingEnabled,
-                                    { isChecked ->
-                                        if (isChecked && toPoint == null) {
-                                            Toast.makeText(
-                                                context, "Please set a destination first",
-                                                Toast.LENGTH_SHORT
-                                            )
-                                                .show()
-                                            isArrivalTrackingEnabled = false
-                                        } else {
-                                            isArrivalTrackingEnabled = isChecked
-                                        }
-                                    },
-                                    checkedColor = Color(0xFF4CAF50).copy(
-                                        alpha = if (isDark) 0.15f else 0.1f
-                                    ),
-                                    iconColor = Color(0xFF4CAF50)
-                                )
+
+                                // Destination check in only for Standard sessions
+                                if (!isParental) {
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    SettingToggleCard(
+                                        "Destination Check-In", "Users can mark arrived when near",
+                                        Icons.Default.TaskAlt,
+                                        isArrivalTrackingEnabled,
+                                        { isChecked ->
+                                            if (isChecked && toPoint == null) {
+                                                Toast.makeText(
+                                                    context, "Please set a destination first",
+                                                    Toast.LENGTH_SHORT
+                                                )
+                                                    .show()
+                                                isArrivalTrackingEnabled = false
+                                            } else isArrivalTrackingEnabled = isChecked
+                                        },
+                                        checkedColor = Color(0xFF4CAF50).copy(
+                                            alpha = if (isDark) 0.15f else 0.1f
+                                        ),
+                                        iconColor = Color(0xFF4CAF50)
+                                    )
+                                } else {
+                                    Spacer(modifier = Modifier.height(90.dp))
+                                }
                             }
 
                             //  BUTTONS INSIDE SCROLLABLE AREA
@@ -522,7 +745,7 @@ fun CreateSessionDialog(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.Center
                             ) {
-                                repeat(2) { iteration ->
+                                repeat(totalPages) { iteration ->
                                     val color =
                                         if (pagerState.currentPage == iteration) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
                                     Box(
@@ -537,6 +760,8 @@ fun CreateSessionDialog(
 
                             Spacer(modifier = Modifier.height(16.dp))
 
+                            val isLastPage = pagerState.currentPage == totalPages - 1
+
                             Button(
                                 onClick = {
                                     if (title.trim()
@@ -544,16 +769,17 @@ fun CreateSessionDialog(
                                     ) {
                                         isTitleError = true
                                         triggerShake()
-                                        if (pagerState.currentPage == 1) scope.launch {
-                                            pagerState.animateScrollToPage(
-                                                0
-                                            )
+                                        if (pagerState.currentPage > 0) scope.launch {
+                                            pagerState.animateScrollToPage(0)
                                         }
                                     } else {
-                                        if (pagerState.currentPage == 0) {
-                                            scope.launch { pagerState.animateScrollToPage(1) }
+                                        if (!isLastPage) {
+                                            scope.launch {
+                                                pagerState.animateScrollToPage(
+                                                    pagerState.currentPage + 1
+                                                )
+                                            }
                                         } else {
-
                                             val newLimit = peopleText.toIntOrNull() ?: 0
                                             val currentActive = existingSession?.activeUsers ?: 0
 
@@ -561,7 +787,7 @@ fun CreateSessionDialog(
                                                 isPeopleError = true
                                                 triggerShake()
 
-                                                if (pagerState.currentPage == 1) {
+                                                if (pagerState.currentPage > 0) {
                                                     scope.launch {
                                                         pagerState.animateScrollToPage(
                                                             0
@@ -569,13 +795,19 @@ fun CreateSessionDialog(
                                                     }
                                                 }
 
-                                                android.widget.Toast.makeText(
+                                                Toast.makeText(
                                                     context,
                                                     "You already have $currentActive users joined",
-                                                    android.widget.Toast.LENGTH_LONG
+                                                    Toast.LENGTH_LONG
                                                 )
                                                     .show()
                                                 return@Button
+                                            }
+
+                                            val finalUnit = when (durationMode) {
+                                                0 -> "Hrs"
+                                                2 -> "Forever"
+                                                else -> "Days"
                                             }
 
                                             onSuccess(
@@ -589,18 +821,23 @@ fun CreateSessionDialog(
                                                     endLat = toPoint?.latitude() ?: 0.0,
                                                     endLng = toPoint?.longitude() ?: 0.0,
                                                     durationVal = durationVal,
-                                                    durationUnit = if (isHours) "Hrs" else "Days",
+                                                    durationUnit = finalUnit,
                                                     maxPeople = peopleText,
                                                     isUsersVisible = isUsersVisible,
                                                     isSharingAllowed = isSharingAllowed,
                                                     isHostSharing = isSharingMyLocation,
-                                                    isArrivalTrackingEnabled = isArrivalTrackingEnabled,
+                                                    isArrivalTrackingEnabled = if (isParental) false else isArrivalTrackingEnabled,
                                                     hostId = existingSession?.hostId ?: "",
                                                     joinCode = existingSession?.joinCode ?: "",
                                                     status = existingSession?.status ?: "Live",
                                                     hostName = existingSession?.hostName ?: "",
                                                     createdTimestamp = existingSession?.createdTimestamp
-                                                        ?: 0L
+                                                        ?: 0L,
+                                                    sessionType = if (isParental) "Parental" else "Standard",
+                                                    isLeaveAllowed = if (isParental) isLeaveAllowed else true,
+                                                    isLocationHistoryEnabled = isLocationHistoryEnabled,
+                                                    historyIntervalMins = historyIntervalMins,
+                                                    isRouteTracingEnabled = isRouteTracingEnabled
                                                 ), isSharingMyLocation
                                             )
                                         }
@@ -615,7 +852,7 @@ fun CreateSessionDialog(
                                     containerColor = MaterialTheme.colorScheme.primary
                                 )
                             ) {
-                                val btnText = if (pagerState.currentPage == 0) "Next"
+                                val btnText = if (!isLastPage) "Next"
                                 else if (existingSession != null) "Update Session"
                                 else "Create Link"
                                 Text(text = btnText, fontSize = 16.sp)
@@ -642,9 +879,11 @@ fun CreateSessionDialog(
                     LocationPicker(
                         onLocationSelected = { name, point ->
                             if (mapSelectionMode == "from") {
-                                fromLoc = name; fromPoint = point
+                                fromLoc = name
+                                fromPoint = point
                             } else {
-                                toLoc = name; toPoint = point
+                                toLoc = name
+                                toPoint = point
                             }
                             mapSelectionMode = null
                         },

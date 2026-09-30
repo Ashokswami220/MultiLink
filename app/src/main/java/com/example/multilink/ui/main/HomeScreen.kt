@@ -111,12 +111,13 @@ fun HomeScreen(
     val (sessionToEdit, setSessionToEdit) = remember { mutableStateOf<SessionData?>(null) }
     val currentSortOption by homeViewModel.sortOption.collectAsState()
 
+    val errorColor = MaterialTheme.colorScheme.error
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
             @Suppress("DEPRECATION")
             if (!isOnline) {
-                window.statusBarColor = Color(0xFFD32F2F).toArgb()
+                window.statusBarColor = errorColor.toArgb()
             } else {
                 window.statusBarColor = Color.Transparent.toArgb()
             }

@@ -830,7 +830,7 @@ fun ExpandableHorizontalTimelineCard(
     val icon =
         if (isToday) Icons.Default.Timeline else if (hasData) Icons.Default.History else Icons.Default.CloudOff
     val tint = if (isToday) Color(
-        0xFF4CAF50
+        0xFF048848
     ) else if (hasData) MaterialTheme.colorScheme.primary else Color.Gray
 
     Surface(

@@ -7,6 +7,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -31,6 +32,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.multilink.R
 import com.google.firebase.auth.FirebaseAuth
@@ -106,7 +108,13 @@ val navItems
             dest = BottomNavDest.Home,
             selectedIcon = Icons.Filled.Home,
             unselectedIcon = Icons.Outlined.Home,
-            label = stringResource(id = R.string.nav_home)
+            label = "Home"
+        ),
+        MultiLinkNavItem(
+            dest = BottomNavDest.SecondHome,
+            selectedIcon = Icons.Filled.GridView,
+            unselectedIcon = Icons.Outlined.GridView,
+            label = "Home"
         ),
         MultiLinkNavItem(
             dest = BottomNavDest.Activity,
@@ -149,129 +157,69 @@ private fun BottomNavigationBar(
     items: List<MultiLinkNavItem>,
     modifier: Modifier = Modifier,
 ) {
-    val barCornerSize = dimensionResource(id = R.dimen.corner_bottom_bar)
-
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(topStart = barCornerSize, topEnd = barCornerSize),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        tonalElevation = dimensionResource(id = R.dimen.elevation_card),
-        shadowElevation = dimensionResource(id = R.dimen.elevation_dialog)
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 16.dp, vertical = 16.dp),
+        contentAlignment = Alignment.Center
     ) {
-        Column(
-            modifier = Modifier.navigationBarsPadding()
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(64.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)) // Dark translucent for slight blur illusion
+                .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                .padding(horizontal = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            HorizontalDivider(
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f),
-                thickness = dimensionResource(id = R.dimen.divider_thickness)
-            )
+            items.forEach { item ->
+                val isSelected = currentDestination == item.dest
+                val interactionSource = remember { MutableInteractionSource() }
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(dimensionResource(id = R.dimen.bottom_bar_height))
-                    .padding(horizontal = dimensionResource(id = R.dimen.padding_standard)),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                items.forEach { item ->
-                    val isSelected = currentDestination == item.dest
-                    val interactionSource = remember { MutableInteractionSource() }
-
-                    // --- User's Lightweight Animation State ---
-                    val scale = remember { Animatable(1f) }
-
-                    LaunchedEffect(isSelected) {
-                        if (isSelected) {
-                            scale.animateTo(
-                                targetValue = 1.2f,
-                                animationSpec = tween(durationMillis = 150)
-                            )
-                            scale.animateTo(
-                                targetValue = 1f,
-                                animationSpec = spring(
-                                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                                    stiffness = Spring.StiffnessLow
-                                )
-                            )
-                        } else {
-                            scale.snapTo(1f)
-                        }
-                    }
-
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clip(CircleShape)
+                        .clickable(
+                            interactionSource = interactionSource,
+                            indication = null
+                        ) { onDestinationSelected(item.dest) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    val bgColor = if (isSelected) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent
+                    
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center,
                         modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .clickable(
-                                interactionSource = interactionSource,
-                                indication = null
-                            ) { onDestinationSelected(item.dest) }
+                            .fillMaxHeight(0.85f)
+                            .fillMaxWidth()
+                            .clip(CircleShape)
+                            .background(bgColor)
                     ) {
-
-                        val indicatorWidth by animateDpAsState(
-                            targetValue = if (isSelected) {
-                                dimensionResource(id = R.dimen.nav_indicator_width_selected)
-                            } else {
-                                dimensionResource(id = R.dimen.nav_indicator_width_unselected)
-                            },
-                            label = "widthAnim",
-                            animationSpec = spring(dampingRatio = 0.6f)
-                        )
-
-                        Box(
-                            modifier = Modifier
-                                .height(dimensionResource(id = R.dimen.nav_indicator_height))
-                                .width(indicatorWidth)
-                                .clip(
-                                    RoundedCornerShape(dimensionResource(id = R.dimen.corner_pill))
-                                )
-                                .background(
-                                    color = if (isSelected) {
-                                        MaterialTheme.colorScheme.secondaryContainer
-                                    } else {
-                                        Color.Transparent
-                                    }
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
+                        Box {
                             Icon(
                                 imageVector = if (isSelected) item.selectedIcon else item.unselectedIcon,
                                 contentDescription = item.label,
-                                tint = if (isSelected) {
-                                    MaterialTheme.colorScheme.onSecondaryContainer
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                                modifier = Modifier
-                                    .size(dimensionResource(id = R.dimen.icon_nav))
-                                    .scale(scale.value)
+                                tint = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(24.dp)
                             )
                         }
-
-                        Spacer(
-                            modifier = Modifier.height(
-                                dimensionResource(id = R.dimen.padding_nav_item_spacer)
-                            )
-                        )
-
+                        
+                        Spacer(modifier = Modifier.height(2.dp))
+                        
                         Text(
                             text = item.label,
+                            color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.labelSmall.copy(
-                                fontSize = with(LocalDensity.current) {
-                                    dimensionResource(id = R.dimen.text_nav_label).toSp()
-                                },
+                                fontSize = 11.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                            ),
-                            color = if (isSelected) {
-                                MaterialTheme.colorScheme.onSurface
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            }
+                            )
                         )
-                        Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars))
                     }
                 }
             }

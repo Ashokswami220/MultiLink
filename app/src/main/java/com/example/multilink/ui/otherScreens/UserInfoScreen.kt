@@ -145,7 +145,7 @@ fun UserInfoScreen(
                             .clip(CircleShape)
                             .background(
                                 if (participantData.status == "Online") Color(
-                                    0xFF4CAF50
+                                    0xFF048848
                                 ) else Color.Gray
                             )
                             .border(3.dp, MaterialTheme.colorScheme.background, CircleShape)

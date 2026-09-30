@@ -819,13 +819,13 @@ fun LiveBottomSummary(
                                             Icon(
                                                 Icons.Default.TaskAlt, null,
                                                 modifier = Modifier.size(12.dp),
-                                                tint = Color(0xFF4CAF50)
+                                                tint = Color(0xFF048848)
                                             )
                                             Spacer(modifier = Modifier.width(2.dp))
                                             Text(
                                                 text = "Reached",
                                                 style = MaterialTheme.typography.labelSmall.copy(
-                                                    fontSize = 9.sp, color = Color(0xFF4CAF50)
+                                                    fontSize = 9.sp, color = Color(0xFF048848)
                                                 ),
                                                 maxLines = 1
                                             )

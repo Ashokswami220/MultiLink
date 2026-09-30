@@ -449,8 +449,8 @@ fun UnifiedJoinDialog(
                                                 Modifier.weight(0.6f)
                                             )
                                             val statusColor =
-                                                if (status == "Live") Color(0xFF4CAF50) else Color(
-                                                    0xFFFF9800
+                                                if (status == "Live") Color(0xFF048848) else Color(
+                                                    0xFFFFC043
                                                 )
                                             InfoStat(
                                                 Icons.Filled.Sensors, "Status", status,

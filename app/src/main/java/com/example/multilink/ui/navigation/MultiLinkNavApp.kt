@@ -11,6 +11,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import com.example.multilink.R
+import com.example.multilink.ui.main.ServicesScreen
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -201,18 +202,20 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
     // --- NAVIGATION SETUP ---
     val visibleTab = when (currentTab) {
         0 -> BottomNavDest.Home
-        1 -> BottomNavDest.Activity
-        2 -> BottomNavDest.Recent
-        3 -> BottomNavDest.Settings
+        1 -> BottomNavDest.SecondHome
+        2 -> BottomNavDest.Activity
+        3 -> BottomNavDest.Recent
+        4 -> BottomNavDest.Settings
         else -> BottomNavDest.Home
     }
 
     val onBottomTabSelected: (BottomNavDest) -> Unit = { dest ->
         currentTab = when (dest) {
             BottomNavDest.Home -> 0
-            BottomNavDest.Activity -> 1
-            BottomNavDest.Recent -> 2
-            BottomNavDest.Settings -> 3
+            BottomNavDest.SecondHome -> 1
+            BottomNavDest.Activity -> 2
+            BottomNavDest.Recent -> 3
+            BottomNavDest.Settings -> 4
         }
     }
 
@@ -413,6 +416,12 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
                                             }
 
                                             1 -> {
+                                                Box(modifier = Modifier.fillMaxSize()) {
+                                                    ServicesScreen()
+                                                }
+                                            }
+
+                                            2 -> {
                                                 val topBarHeight =
                                                     WindowInsets.statusBars.asPaddingValues()
                                                         .calculateTopPadding() + 64.dp
@@ -436,7 +445,7 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
                                                 }
                                             }
 
-                                            2 -> {
+                                            3 -> {
                                                 val topBarHeight =
                                                     WindowInsets.statusBars.asPaddingValues()
                                                         .calculateTopPadding() + 64.dp
@@ -455,7 +464,7 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
                                                 }
                                             }
 
-                                            3 -> {
+                                            4 -> {
                                                 val topBarHeight =
                                                     WindowInsets.statusBars.asPaddingValues()
                                                         .calculateTopPadding() + 64.dp
@@ -471,16 +480,17 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
                                     }
 
                                     val topBarAlpha by animateFloatAsState(
-                                        targetValue = if (currentTab > 0) 1f else 0f,
+                                        targetValue = if (currentTab > 1) 1f else 0f,
                                         animationSpec = tween(150),
                                         label = "top_bar_alpha"
                                     )
 
                                     val topBarTitle = when (currentTab) {
                                         0 -> stringResource(id = R.string.app_name)
-                                        1 -> "Activity"
-                                        2 -> "Recent History"
-                                        3 -> "Settings"
+                                        1 -> stringResource(id = R.string.app_name)
+                                        2 -> "Activity"
+                                        3 -> "Recent History"
+                                        4 -> "Settings"
                                         else -> stringResource(id = R.string.app_name)
                                     }
 

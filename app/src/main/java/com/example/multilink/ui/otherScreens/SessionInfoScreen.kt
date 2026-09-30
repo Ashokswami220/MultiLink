@@ -231,7 +231,7 @@ fun InfoRowBool(icon: ImageVector, label: String, isEnabled: Boolean) {
         )
 
         val statusText = if (isEnabled) "Yes" else "No"
-        val statusColor = if (isEnabled) Color(0xFF4CAF50) else MaterialTheme.colorScheme.error
+        val statusColor = if (isEnabled) Color(0xFF048848) else MaterialTheme.colorScheme.error
 
         Text(
             statusText,

@@ -97,7 +97,7 @@ fun SessionCard(
     }
 
     val hasDest = data.endLat != null && data.endLat != 0.0
-    val statusColor = if (isPaused) Color(0xFFFF9800) else Color(0xFF4CAF50)
+    val statusColor = if (isPaused) Color(0xFFFFC043) else Color(0xFF048848)
     val statusText = if (isPaused) "PAUSED" else "LIVE"
 
     val infiniteTransition = rememberInfiniteTransition(label = "live_pulse")

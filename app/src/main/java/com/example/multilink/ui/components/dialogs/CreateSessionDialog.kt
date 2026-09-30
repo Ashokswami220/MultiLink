@@ -552,10 +552,10 @@ fun CreateSessionDialog(
                                         if (!it) isRouteTracingEnabled =
                                             false // Route needs history
                                     },
-                                    checkedColor = if (isDark) Color(0xFF3F51B5).copy(
+                                    checkedColor = MaterialTheme.colorScheme.primary.copy(
                                         alpha = 0.3f
-                                    ) else Color(0xFFE8EAF6),
-                                    iconColor = Color(0xFF3F51B5)
+                                    ),
+                                    iconColor = MaterialTheme.colorScheme.primary
                                 )
 
                                 Column(
@@ -583,7 +583,7 @@ fun CreateSessionDialog(
                                                     alpha = 0.4f
                                                 )
 
-                                                isSelected -> Color(0xFF3F51B5)
+                                                isSelected -> MaterialTheme.colorScheme.primary
                                                 else -> inputSurfaceColor
                                             }
 
@@ -592,7 +592,7 @@ fun CreateSessionDialog(
                                                     alpha = 0.38f
                                                 )
 
-                                                isSelected -> Color.White
+                                                isSelected -> MaterialTheme.colorScheme.onPrimary
                                                 else -> MaterialTheme.colorScheme.onSurfaceVariant
                                             }
 
@@ -728,10 +728,10 @@ fun CreateSessionDialog(
                                                 isArrivalTrackingEnabled = false
                                             } else isArrivalTrackingEnabled = isChecked
                                         },
-                                        checkedColor = Color(0xFF4CAF50).copy(
+                                        checkedColor = Color(0xFF048848).copy(
                                             alpha = if (isDark) 0.15f else 0.1f
                                         ),
-                                        iconColor = Color(0xFF4CAF50)
+                                        iconColor = Color(0xFF048848)
                                     )
                                 } else {
                                     Spacer(modifier = Modifier.height(90.dp))

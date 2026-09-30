@@ -784,9 +784,9 @@ fun UserGridCard(
                             .align(Alignment.BottomEnd)
                             .clip(CircleShape)
                             .background(
-                                if (hasArrived) Color(0xFF4CAF50)
-                                else if (isUserPaused) Color(0xFFFF9800)
-                                else if (user.status == "Online") Color(0xFF4CAF50)
+                                if (hasArrived) Color(0xFF048848)
+                                else if (isUserPaused) Color(0xFFFFC043)
+                                else if (user.status == "Online") Color(0xFF048848)
                                 else Color.Gray
                             )
                             .border(
@@ -1001,7 +1001,7 @@ fun UserGridCard(
                     // Display "Arrived" vs "Distance"
                     if (hasArrived) {
                         Icon(
-                            Icons.Default.TaskAlt, null, tint = Color(0xFF4CAF50),
+                            Icons.Default.TaskAlt, null, tint = Color(0xFF048848),
                             modifier = Modifier.size(dimensionResource(R.dimen.icon_stat))
                         )
                         Spacer(modifier = Modifier.width(dimensionResource(R.dimen.padding_mini)))
@@ -1009,7 +1009,7 @@ fun UserGridCard(
                             "Arrived at Destination",
                             style = MaterialTheme.typography.labelSmall.copy(
                                 fontWeight = FontWeight.Bold
-                            ), color = Color(0xFF4CAF50)
+                            ), color = Color(0xFF048848)
                         )
                     } else {
                         Icon(

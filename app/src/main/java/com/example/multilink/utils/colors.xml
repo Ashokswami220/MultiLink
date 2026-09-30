@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Uber-style palette — LIGHT mode. Place in res/values/colors.xml -->
+<resources>
+
+    <!-- Core -->
+    <color name="uber_background">#FFFFFF</color>
+    <color name="uber_surface">#F6F6F6</color>
+    <color name="uber_primary_action">#000000</color>
+    <color name="uber_on_primary_action">#FFFFFF</color>
+
+    <!-- Accent -->
+    <color name="uber_accent_blue">#276EF1</color>
+
+    <!-- Status -->
+    <color name="uber_success">#048848</color>
+    <color name="uber_warning">#FFC043</color>
+    <color name="uber_error">#E11900</color>
+
+    <!-- Text -->
+    <color name="uber_text_primary">#000000</color>
+    <color name="uber_text_secondary">#545454</color>
+    <color name="uber_text_tertiary">#757575</color>
+    <color name="uber_text_disabled">#AFAFAF</color>
+
+    <!-- Borders / dividers -->
+    <color name="uber_border_subtle">#EEEEEE</color>
+    <color name="uber_border_default">#E2E2E2</color>
+    <color name="uber_divider">#E5E5E5</color>
+
+    <!-- Full mono / gray ramp -->
+    <color name="uber_mono_100">#FFFFFF</color>
+    <color name="uber_mono_200">#F7F7F7</color>
+    <color name="uber_mono_300">#F0F0F0</color>
+    <color name="uber_mono_400">#E5E5E5</color>
+    <color name="uber_mono_500">#CCCCCC</color>
+    <color name="uber_mono_600">#B3B3B3</color>
+    <color name="uber_mono_700">#999999</color>
+    <color name="uber_mono_800">#666666</color>
+    <color name="uber_mono_900">#333333</color>
+    <color name="uber_mono_1000">#000000</color>
+
+</resources>

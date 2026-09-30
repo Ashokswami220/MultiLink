@@ -48,7 +48,7 @@ fun NoInternetBanner(
         exit = shrinkVertically()
     ) {
         Surface(
-            color = Color(0xFFD32F2F),
+            color = MaterialTheme.colorScheme.error,
             modifier = Modifier
                 .fillMaxWidth()
                 .offset { IntOffset(offsetX.value.roundToInt(), 0) }
@@ -65,7 +65,7 @@ fun NoInternetBanner(
                 Icon(
                     imageVector = Icons.Default.CloudOff,
                     contentDescription = null,
-                    tint = Color.White,
+                    tint = MaterialTheme.colorScheme.onError,
                     modifier = Modifier.size(24.dp)
                 )
 
@@ -74,7 +74,7 @@ fun NoInternetBanner(
                 Column {
                     Text(
                         text = "No Internet Connection",
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onError,
                         style = MaterialTheme.typography.titleSmall.copy(
                             fontWeight = FontWeight.Bold
                         )
@@ -82,7 +82,7 @@ fun NoInternetBanner(
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = "Live tracking & updates are paused.",
-                        color = Color.White.copy(alpha = 0.9f),
+                        color = MaterialTheme.colorScheme.onError.copy(alpha = 0.9f),
                         style = MaterialTheme.typography.bodySmall.copy(
                             fontSize = 12.sp
                         )

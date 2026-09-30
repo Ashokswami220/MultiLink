@@ -66,6 +66,7 @@ import com.example.multilink.ui.components.NoInternetBanner
 import com.example.multilink.ui.main.ActivityScreen
 import com.example.multilink.ui.viewmodel.MultiLinkViewModel
 import com.example.multilink.ui.main.RecentScreen
+import com.example.multilink.ui.otherScreens.ExperimentScreen
 import com.example.multilink.ui.otherScreens.RecentSessionDetailScreen
 import com.example.multilink.ui.tracker.SeeAllScreen
 import com.example.multilink.ui.otherScreens.UserProfileScreen
@@ -473,7 +474,9 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
                                                         .fillMaxSize()
                                                         .padding(top = topBarHeight)
                                                 ) {
-                                                    SettingsScreen()
+                                                    SettingsScreen(
+                                                        onExperimentClick = { navController.navigate(MultiLinkRoutes.EXPERIMENT) }
+                                                    )
                                                 }
                                             }
                                         }
@@ -940,6 +943,41 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
                                 }
                             )
                         }
+                    }
+
+                    // ExperimentScreen
+                    composable(
+                        route = MultiLinkRoutes.EXPERIMENT,
+                        enterTransition = {
+                            slideInHorizontally(
+                                initialOffsetX = { it }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        },
+                        exitTransition = {
+                            slideOutHorizontally(
+                                targetOffsetX = { -it / 3 }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        },
+                        popEnterTransition = {
+                            slideInHorizontally(
+                                initialOffsetX = { -it / 3 }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        },
+                        popExitTransition = {
+                            slideOutHorizontally(
+                                targetOffsetX = { it }, animationSpec = tween(
+                                    ANIM_DURATION, easing = ANIM_EASING
+                                )
+                            )
+                        }
+                    ) {
+                        ExperimentScreen(onNavigateBack = { navController.popBackStack() })
                     }
 
                     // RecentSessionDetailScreen

@@ -28,7 +28,8 @@ import com.example.multilink.utils.HapticHelper
 @Composable
 fun SettingsScreen(
     onCustomizeProfileClick: () -> Unit = {},
-    onSignOutClick: () -> Unit = {}
+    onSignOutClick: () -> Unit = {},
+    onExperimentClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scrollState = rememberScrollState()
@@ -128,6 +129,18 @@ fun SettingsScreen(
 
         // Data & Account (Danger Zone)
         SettingsSection {
+            SettingsActionItem(
+                icon = Icons.Outlined.Science,
+                title = "UI Experiments",
+                subtitle = "Help us choose the best UI icons",
+                iconTint = MaterialTheme.colorScheme.primary,
+                titleColor = MaterialTheme.colorScheme.primary,
+                onClick = onExperimentClick
+            )
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f),
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
             SettingsActionItem(
                 icon = Icons.Outlined.DeleteOutline,
                 title = "Delete My Data",

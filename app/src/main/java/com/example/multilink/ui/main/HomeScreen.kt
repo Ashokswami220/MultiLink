@@ -206,7 +206,7 @@ fun HomeScreen(
         NoInternetBanner(isVisible = !isOnline, errorTrigger = networkErrorTrigger)
 
         BoxWithConstraints(modifier = Modifier.weight(1f)) {
-            val minScrollHeight = this.maxHeight + 1.dp
+            val minScrollHeight = this.maxHeight
 
             val bannerHeight = (this.maxHeight * 0.3f).coerceAtLeast(200.dp)
             val bannerHeightPx = with(density) { bannerHeight.toPx() }

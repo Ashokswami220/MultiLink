@@ -135,7 +135,7 @@ fun RecentSessionDetailScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            val minScrollHeight = this.maxHeight + 1.dp
+            val minScrollHeight = this.maxHeight
 
             Column(
                 modifier = Modifier

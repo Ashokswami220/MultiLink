@@ -32,6 +32,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -66,6 +68,8 @@ fun ServicesScreen() {
             .padding(vertical = 24.dp)
             .windowInsetsPadding(WindowInsets.statusBars)
     ) {
+        JoinSessionSearchBar()
+        Spacer(modifier = Modifier.height(24.dp))
         TrackingCardsSection()
         Spacer(modifier = Modifier.height(32.dp))
 
@@ -108,18 +112,19 @@ fun TrackingCardsSection() {
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             TrackingCard(
-                title = "Track your family",
+                title = "Family Circle",
                 imageRes = R.drawable.family_3d,
                 imageSize = 60,
                 modifier = Modifier.weight(0.5f),
-                height = 120
+                height = 100
             )
             TrackingCard(
-                title = "Track Your trips",
+                title = "Live Trips",
                 imageRes = R.drawable.trips_3d,
-                imageSize = 68,
+                imageSize = 64,
                 modifier = Modifier.weight(0.5f),
-                height = 120
+                height = 100,
+                topPadding = 6
             )
         }
 
@@ -130,7 +135,7 @@ fun TrackingCardsSection() {
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             TrackingCard(
-                title = "Track your Parcel",
+                title = "Parcels",
                 imageRes = R.drawable.parcel_3d,
                 imageSize = 54,
                 modifier = Modifier.weight(0.5f),
@@ -392,5 +397,76 @@ fun PromoCard(title: String, buttonText: String) {
                 .clip(CircleShape)
                 .background(Color(0xFFFFD1C1).copy(alpha = 0.8f))
         )
+    }
+}
+
+@Composable
+fun JoinSessionSearchBar(
+    modifier: Modifier = Modifier
+) {
+    val isLight = !isSystemInDarkTheme()
+    val bgColor = if (isLight) Color(0xFFF3F3F3) else MaterialTheme.colorScheme.surfaceVariant
+    val textColor = if (isLight) Color.Black else MaterialTheme.colorScheme.onSurfaceVariant
+    val iconColor = if (isLight) Color.Black else MaterialTheme.colorScheme.onSurfaceVariant
+    val pillBgColor = if (isLight) Color.White else MaterialTheme.colorScheme.background
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .height(56.dp)
+            .clip(CircleShape)
+            .background(bgColor)
+            .clickable { /* Handle click */ },
+        contentAlignment = Alignment.CenterStart
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(start = 16.dp, end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.Link,
+                contentDescription = "Join Link",
+                tint = iconColor,
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.width(16.dp))
+            Text(
+                text = "Join session",
+                style = MaterialTheme.typography.titleMedium,
+                color = textColor,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.weight(1f)
+            )
+
+            // Right side "Link" button (resembling the "Later" button)
+            Box(
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(pillBgColor)
+                    .clickable { /* Handle link click */ }
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.QrCodeScanner,
+                        contentDescription = "Scan",
+                        tint = iconColor,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Scan",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = textColor,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
     }
 }

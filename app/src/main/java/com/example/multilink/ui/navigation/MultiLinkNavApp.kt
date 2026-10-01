@@ -5,13 +5,18 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.*
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import com.example.multilink.R
-import com.example.multilink.ui.main.ServicesScreen
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -22,6 +27,7 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -36,16 +42,32 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.credentials.ClearCredentialStateRequest
+import androidx.credentials.CredentialManager
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -53,36 +75,36 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.example.multilink.R
 import com.example.multilink.repo.AuthRepository
 import com.example.multilink.repo.RealtimeRepository
 import com.example.multilink.service.LocationService
 import com.example.multilink.ui.auth.InfoInputScreen
-import com.example.multilink.ui.tracker.DetailScreen
-import com.example.multilink.ui.main.HomeScreen
-import com.example.multilink.ui.tracker.LiveTrackingScreen
 import com.example.multilink.ui.auth.LoginScreen
 import com.example.multilink.ui.components.GlobalTrackingBlocker
 import com.example.multilink.ui.components.NoInternetBanner
 import com.example.multilink.ui.main.ActivityScreen
-import com.example.multilink.ui.viewmodel.MultiLinkViewModel
+import com.example.multilink.ui.main.HomeScreen
 import com.example.multilink.ui.main.RecentScreen
+import com.example.multilink.ui.main.ServicesScreen
+import com.example.multilink.ui.main.SettingsScreen
 import com.example.multilink.ui.otherScreens.ExperimentScreen
+import com.example.multilink.ui.otherScreens.NotificationDetailScreen
 import com.example.multilink.ui.otherScreens.RecentSessionDetailScreen
-import com.example.multilink.ui.tracker.SeeAllScreen
+import com.example.multilink.ui.otherScreens.SessionInfoScreen
 import com.example.multilink.ui.otherScreens.UserProfileScreen
+import com.example.multilink.ui.tracker.DetailScreen
+import com.example.multilink.ui.tracker.LiveTrackingScreen
+import com.example.multilink.ui.tracker.ParentalTrackingScreen
+import com.example.multilink.ui.tracker.SeeAllScreen
+import com.example.multilink.ui.tracker.SoloNavigationScreen
+import com.example.multilink.ui.viewmodel.ActivityViewModel
+import com.example.multilink.ui.viewmodel.MultiLinkViewModel
 import com.example.multilink.utils.NetworkMonitor
 import com.google.firebase.auth.FirebaseAuth
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.haze
 import kotlinx.coroutines.launch
-import androidx.credentials.ClearCredentialStateRequest
-import androidx.credentials.CredentialManager
-import com.example.multilink.ui.main.SettingsScreen
-import com.example.multilink.ui.otherScreens.NotificationDetailScreen
-import com.example.multilink.ui.otherScreens.SessionInfoScreen
-import com.example.multilink.ui.tracker.ParentalTrackingScreen
-import com.example.multilink.ui.tracker.SoloNavigationScreen
-import com.example.multilink.ui.viewmodel.ActivityViewModel
 
 const val ANIM_DURATION = 400
 val ANIM_EASING = FastOutSlowInEasing
@@ -203,20 +225,19 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
     // --- NAVIGATION SETUP ---
     val visibleTab = when (currentTab) {
         0 -> BottomNavDest.Home
-        1 -> BottomNavDest.SecondHome
-        2 -> BottomNavDest.Activity
-        3 -> BottomNavDest.Recent
-        4 -> BottomNavDest.Settings
+        1 -> BottomNavDest.Activity
+        2 -> BottomNavDest.Recent
+        3 -> BottomNavDest.Settings
         else -> BottomNavDest.Home
     }
 
     val onBottomTabSelected: (BottomNavDest) -> Unit = { dest ->
         currentTab = when (dest) {
             BottomNavDest.Home -> 0
-            BottomNavDest.SecondHome -> 1
-            BottomNavDest.Activity -> 2
-            BottomNavDest.Recent -> 3
-            BottomNavDest.Settings -> 4
+            BottomNavDest.SecondHome -> 0
+            BottomNavDest.Activity -> 1
+            BottomNavDest.Recent -> 2
+            BottomNavDest.Settings -> 3
         }
     }
 
@@ -330,179 +351,244 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
 
                         Scaffold(
                             contentWindowInsets = WindowInsets(0.dp),
-                            bottomBar = {
-                                if (!isLandscape) {
-                                    MultiLinkNavigationBar(
-                                        currentDestination = visibleTab,
-                                        onDestinationSelected = onBottomTabSelected
-                                    )
+                        ) { innerPadding ->
+                            var isBottomBarVisible by remember { mutableStateOf(true) }
+                            val bottomBarOffset by animateDpAsState(
+                                targetValue = if (isBottomBarVisible) 0.dp else 120.dp,
+                                animationSpec = tween(easing = FastOutLinearInEasing),
+                                label = "bottom_bar_offset"
+                            )
+
+                            val density = LocalDensity.current
+                            val configuration = LocalConfiguration.current
+                            val nestedScrollConnection = remember {
+                                object : NestedScrollConnection {
+                                    var accumulatedScroll = 0f
+
+                                    // Use 6% of the screen height as a dynamic threshold instead of hardcoded dp
+                                    val scrollThresholdPx = with(
+                                        density
+                                    ) { (configuration.screenHeightDp.dp * 0.10f).toPx() }
+
+                                    override fun onPostScroll(
+                                        consumed: Offset,
+                                        available: Offset,
+                                        source: NestedScrollSource
+                                    ): Offset {
+                                        val delta = consumed.y
+
+                                        // Reset accumulator if scrolling direction changes
+                                        if ((delta > 0 && accumulatedScroll < 0) || (delta < 0 && accumulatedScroll > 0)) {
+                                            accumulatedScroll = 0f
+                                        }
+
+                                        accumulatedScroll += delta
+
+                                        if (accumulatedScroll < -scrollThresholdPx) {
+                                            // Scrolled down 50dp → hide
+                                            isBottomBarVisible = false
+                                            accumulatedScroll = -scrollThresholdPx
+                                        } else if (accumulatedScroll > scrollThresholdPx) {
+                                            // Scrolled up 50dp → show
+                                            isBottomBarVisible = true
+                                            accumulatedScroll = scrollThresholdPx
+                                        }
+                                        return Offset.Zero
+                                    }
                                 }
                             }
-                        ) { innerPadding ->
-                            Row(
+
+                            Box(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .padding(innerPadding)
-                                    .windowInsetsPadding(
-                                        WindowInsets.systemBars.only(WindowInsetsSides.Horizontal)
-                                    )
+                                    .nestedScroll(nestedScrollConnection)
                             ) {
-                                if (isLandscape) {
-                                    MultiLinkNavigationRail(
-                                        currentDestination = visibleTab,
-                                        onDestinationSelected = onBottomTabSelected
-                                    )
-                                }
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .windowInsetsPadding(
+                                            WindowInsets.systemBars.only(
+                                                WindowInsetsSides.Horizontal
+                                            )
+                                        )
+                                ) {
+                                    if (isLandscape) {
+                                        MultiLinkNavigationRail(
+                                            currentDestination = visibleTab,
+                                            onDestinationSelected = onBottomTabSelected
+                                        )
+                                    }
 
-                                Box(modifier = Modifier.fillMaxSize()) {
-                                    AnimatedContent(
-                                        targetState = currentTab,
-                                        transitionSpec = {
-                                            fadeIn(tween(100)) togetherWith fadeOut(tween(100))
-                                        },
-                                        label = "tab_switch",
-                                        modifier = Modifier.fillMaxSize()
-                                    ) { targetTab ->
-                                        when (targetTab) {
-                                            0 -> {
-                                                HomeScreen(
-                                                    uiState = uiState,
-                                                    onSessionClick = { session ->
-                                                        navController.navigate(
-                                                            "${MultiLinkRoutes.SEE_ALL}/${session.id}"
-                                                        )
-                                                    },
-                                                    onNavigateSession = { session ->
-                                                        navController.navigate(
-                                                            "${MultiLinkRoutes.SOLO_NAVIGATION}/${session.id}"
-                                                        )
-                                                    },
-                                                    onShareSession = { session ->
-                                                        val code = session.joinCode
-                                                        val hostName = session.hostName
-                                                        val encodedCode =
-                                                            android.util.Base64.encodeToString(
-                                                                code.toByteArray(),
-                                                                android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP
-                                                            )
-                                                        val link =
-                                                            "https://multilink-aa2228.web.app/invite/$encodedCode"
-                                                        val shareText =
-                                                            if (session.isSharingAllowed) {
-                                                                "Title: \"${session.title}\"\nHost: $hostName\nJoin Code: $code\n\nClick to join:\n$link"
-                                                            } else {
-                                                                "Title: \"${session.title}\"\nHost: $hostName\n\nClick the link to join:\n$link"
-                                                            }
-                                                        val sendIntent =
-                                                            Intent(Intent.ACTION_SEND).apply {
-                                                                putExtra(
-                                                                    Intent.EXTRA_TEXT, shareText
-                                                                )
-                                                                type = "text/plain"
-                                                            }
-                                                        context.startActivity(
-                                                            Intent.createChooser(
-                                                                sendIntent, "Share Live Link"
-                                                            )
-                                                        )
-                                                    },
-                                                    onProfileClick = onProfileClick,
-                                                    initialJoinCode = startJoinCode,
-                                                    onSessionInfoClick = { sessionId ->
-                                                        navController.navigate(
-                                                            "${MultiLinkRoutes.SESSION_INFO}/$sessionId"
-                                                        )
-                                                    },
-                                                )
-                                            }
-
-                                            1 -> {
-                                                Box(modifier = Modifier.fillMaxSize()) {
-                                                    ServicesScreen()
+                                    Box(modifier = Modifier.fillMaxSize()) {
+                                        AnimatedContent(
+                                            targetState = currentTab,
+                                            transitionSpec = {
+                                                fadeIn(tween(100)) togetherWith fadeOut(tween(100))
+                                            },
+                                            label = "tab_switch",
+                                            modifier = Modifier.fillMaxSize()
+                                        ) { targetTab ->
+                                            when (targetTab) {
+                                                0 -> {
+                                                    Box(modifier = Modifier.fillMaxSize()) {
+                                                        ServicesScreen()
+                                                    }
                                                 }
-                                            }
 
-                                            2 -> {
-                                                val topBarHeight =
-                                                    WindowInsets.statusBars.asPaddingValues()
-                                                        .calculateTopPadding() + 64.dp
-                                                Box(
-                                                    modifier = Modifier
-                                                        .fillMaxSize()
-                                                        .padding(top = topBarHeight)
-                                                ) {
-                                                    ActivityScreen(
-                                                        onNavigateToLiveTracking = { sessionId ->
+                                                1 -> {
+                                                    val topBarHeight =
+                                                        WindowInsets.statusBars.asPaddingValues()
+                                                            .calculateTopPadding() + 64.dp
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .fillMaxSize()
+                                                            .padding(top = topBarHeight)
+                                                    ) {
+                                                        ActivityScreen(
+                                                            onNavigateToLiveTracking = { sessionId ->
+                                                                navController.navigate(
+                                                                    "${MultiLinkRoutes.LIVE_TRACKING}/$sessionId"
+                                                                )
+                                                            },
+                                                            onNavigateToNotificationDetail = { notificationId ->
+                                                                navController.navigate(
+                                                                    "${MultiLinkRoutes.NOTIFICATION_DETAIL}/$notificationId"
+                                                                )
+                                                            }
+                                                        )
+                                                    }
+                                                }
+
+                                                2 -> {
+                                                    val topBarHeight =
+                                                        WindowInsets.statusBars.asPaddingValues()
+                                                            .calculateTopPadding() + 64.dp
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .fillMaxSize()
+                                                            .padding(top = topBarHeight)
+                                                    ) {
+                                                        RecentScreen(
+                                                            onSessionClick = { clickedSessionId ->
+                                                                navController.navigate(
+                                                                    "${MultiLinkRoutes.RECENT_DETAIL}/$clickedSessionId"
+                                                                )
+                                                            }
+                                                        )
+                                                    }
+                                                }
+
+                                                3 -> {
+                                                    val topBarHeight =
+                                                        WindowInsets.statusBars.asPaddingValues()
+                                                            .calculateTopPadding() + 64.dp
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .fillMaxSize()
+                                                            .padding(top = topBarHeight)
+                                                    ) {
+                                                        SettingsScreen(
+                                                            onExperimentClick = {
+                                                                navController.navigate(
+                                                                    MultiLinkRoutes.EXPERIMENT
+                                                                )
+                                                            },
+                                                            onOldHomeClick = { currentTab = -1 }
+                                                        )
+                                                    }
+                                                }
+
+                                                -1 -> {
+                                                    HomeScreen(
+                                                        uiState = uiState,
+                                                        onSessionClick = { session ->
                                                             navController.navigate(
-                                                                "${MultiLinkRoutes.LIVE_TRACKING}/$sessionId"
+                                                                "${MultiLinkRoutes.SEE_ALL}/${session.id}"
                                                             )
                                                         },
-                                                        onNavigateToNotificationDetail = { notificationId ->
+                                                        onNavigateSession = { session ->
                                                             navController.navigate(
-                                                                "${MultiLinkRoutes.NOTIFICATION_DETAIL}/$notificationId"
+                                                                "${MultiLinkRoutes.SOLO_NAVIGATION}/${session.id}"
                                                             )
-                                                        }
-                                                    )
-                                                }
-                                            }
-
-                                            3 -> {
-                                                val topBarHeight =
-                                                    WindowInsets.statusBars.asPaddingValues()
-                                                        .calculateTopPadding() + 64.dp
-                                                Box(
-                                                    modifier = Modifier
-                                                        .fillMaxSize()
-                                                        .padding(top = topBarHeight)
-                                                ) {
-                                                    RecentScreen(
-                                                        onSessionClick = { clickedSessionId ->
+                                                        },
+                                                        onShareSession = { session ->
+                                                            val code = session.joinCode
+                                                            val hostName = session.hostName
+                                                            val encodedCode =
+                                                                android.util.Base64.encodeToString(
+                                                                    code.toByteArray(),
+                                                                    android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP
+                                                                )
+                                                            val link =
+                                                                "https://multilink-aa2228.web.app/invite/$encodedCode"
+                                                            val shareText =
+                                                                if (session.isSharingAllowed) {
+                                                                    "Title: \"${session.title}\"\nHost: $hostName\nJoin Code: $code\n\nClick to join:\n$link"
+                                                                } else {
+                                                                    "Title: \"${session.title}\"\nHost: $hostName\n\nClick the link to join:\n$link"
+                                                                }
+                                                            val sendIntent =
+                                                                Intent(Intent.ACTION_SEND).apply {
+                                                                    putExtra(
+                                                                        Intent.EXTRA_TEXT, shareText
+                                                                    )
+                                                                    type = "text/plain"
+                                                                }
+                                                            context.startActivity(
+                                                                Intent.createChooser(
+                                                                    sendIntent, "Share Live Link"
+                                                                )
+                                                            )
+                                                        },
+                                                        onProfileClick = onProfileClick,
+                                                        initialJoinCode = startJoinCode,
+                                                        onSessionInfoClick = { sessionId ->
                                                             navController.navigate(
-                                                                "${MultiLinkRoutes.RECENT_DETAIL}/$clickedSessionId"
+                                                                "${MultiLinkRoutes.SESSION_INFO}/$sessionId"
                                                             )
-                                                        }
-                                                    )
-                                                }
-                                            }
-
-                                            4 -> {
-                                                val topBarHeight =
-                                                    WindowInsets.statusBars.asPaddingValues()
-                                                        .calculateTopPadding() + 64.dp
-                                                Box(
-                                                    modifier = Modifier
-                                                        .fillMaxSize()
-                                                        .padding(top = topBarHeight)
-                                                ) {
-                                                    SettingsScreen(
-                                                        onExperimentClick = { navController.navigate(MultiLinkRoutes.EXPERIMENT) }
+                                                        },
                                                     )
                                                 }
                                             }
                                         }
+
+                                        val topBarAlpha by animateFloatAsState(
+                                            targetValue = if (currentTab > 0) 1f else 0f,
+                                            animationSpec = tween(150),
+                                            label = "top_bar_alpha"
+                                        )
+
+                                        val topBarTitle = when (currentTab) {
+                                            0 -> stringResource(id = R.string.app_name)
+                                            1 -> "Activity"
+                                            2 -> "Recent History"
+                                            3 -> "Settings"
+                                            -1 -> "Sessions"
+                                            else -> stringResource(id = R.string.app_name)
+                                        }
+
+                                        if (topBarAlpha > 0f) {
+                                            MultiLinkTopBar(
+                                                title = topBarTitle,
+                                                modifier = Modifier.alpha(topBarAlpha),
+                                                onProfileClick = onProfileClick,
+                                                windowInsets = WindowInsets.statusBars
+                                            )
+                                        }
                                     }
+                                }
 
-                                    val topBarAlpha by animateFloatAsState(
-                                        targetValue = if (currentTab > 1) 1f else 0f,
-                                        animationSpec = tween(150),
-                                        label = "top_bar_alpha"
-                                    )
-
-                                    val topBarTitle = when (currentTab) {
-                                        0 -> stringResource(id = R.string.app_name)
-                                        1 -> stringResource(id = R.string.app_name)
-                                        2 -> "Activity"
-                                        3 -> "Recent History"
-                                        4 -> "Settings"
-                                        else -> stringResource(id = R.string.app_name)
-                                    }
-
-                                    if (topBarAlpha > 0f) {
-                                        MultiLinkTopBar(
-                                            title = topBarTitle,
-                                            modifier = Modifier.alpha(topBarAlpha),
-                                            onProfileClick = onProfileClick,
-                                            windowInsets = WindowInsets.statusBars
+                                // Floating bottom bar overlay
+                                if (!isLandscape) {
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.BottomCenter)
+                                            .offset(y = bottomBarOffset)
+                                    ) {
+                                        MultiLinkNavigationBar(
+                                            currentDestination = visibleTab,
+                                            onDestinationSelected = onBottomTabSelected
                                         )
                                     }
                                 }

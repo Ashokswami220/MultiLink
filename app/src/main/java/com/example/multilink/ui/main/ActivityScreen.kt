@@ -231,7 +231,7 @@ fun DashboardSection(
     }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val minScrollHeight = this.maxHeight + 1.dp
+        val minScrollHeight = this.maxHeight
 
         Column(
             modifier = Modifier
@@ -323,7 +323,7 @@ fun InboxSection(
     }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val minScrollHeight = this.maxHeight + 1.dp
+        val minScrollHeight = this.maxHeight
 
         Column(
             modifier = Modifier

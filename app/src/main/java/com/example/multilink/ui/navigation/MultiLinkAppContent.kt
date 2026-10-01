@@ -2,7 +2,6 @@ package com.example.multilink.ui.navigation
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -111,12 +110,6 @@ val navItems
             label = "Home"
         ),
         MultiLinkNavItem(
-            dest = BottomNavDest.SecondHome,
-            selectedIcon = Icons.Filled.GridView,
-            unselectedIcon = Icons.Outlined.GridView,
-            label = "Home"
-        ),
-        MultiLinkNavItem(
             dest = BottomNavDest.Activity,
             selectedIcon = Icons.Filled.Notifications,
             unselectedIcon = Icons.Outlined.Notifications,
@@ -161,16 +154,20 @@ private fun BottomNavigationBar(
         modifier = modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 16.dp),
+            .padding(bottom = 10.dp), // Added 10.dp bottom padding
         contentAlignment = Alignment.Center
     ) {
         Row(
             modifier = Modifier
-                .fillMaxWidth()
-                .height(64.dp)
+                .fillMaxWidth(0.75f) // Made it even smaller in width
+                .height(60.dp) // Decreased slight height
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)) // Dark translucent for slight blur illusion
-                .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                .background(MaterialTheme.colorScheme.background)
+                .border(
+                    width = 1.5.dp,
+                    color = if (androidx.compose.foundation.isSystemInDarkTheme()) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.outlineVariant,
+                    shape = CircleShape
+                )
                 .padding(horizontal = 6.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
@@ -190,8 +187,9 @@ private fun BottomNavigationBar(
                         ) { onDestinationSelected(item.dest) },
                     contentAlignment = Alignment.Center
                 ) {
-                    val bgColor = if (isSelected) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent
-                    
+                    val bgColor =
+                        if (isSelected) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent
+
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center,
@@ -209,9 +207,9 @@ private fun BottomNavigationBar(
                                 modifier = Modifier.size(24.dp)
                             )
                         }
-                        
+
                         Spacer(modifier = Modifier.height(2.dp))
-                        
+
                         Text(
                             text = item.label,
                             color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,

@@ -29,7 +29,8 @@ import com.example.multilink.utils.HapticHelper
 fun SettingsScreen(
     onCustomizeProfileClick: () -> Unit = {},
     onSignOutClick: () -> Unit = {},
-    onExperimentClick: () -> Unit = {}
+    onExperimentClick: () -> Unit = {},
+    onOldHomeClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scrollState = rememberScrollState()
@@ -124,6 +125,16 @@ fun SettingsScreen(
                 icon = Icons.Outlined.Info,
                 title = "About Us",
                 onClick = { /* About Us Logic */ }
+            )
+        }
+
+        // Quick Access
+        SettingsSection {
+            SettingsActionItem(
+                icon = Icons.Outlined.Dashboard,
+                title = "Sessions Dashboard",
+                subtitle = "Access the classic sessions home screen",
+                onClick = onOldHomeClick
             )
         }
 

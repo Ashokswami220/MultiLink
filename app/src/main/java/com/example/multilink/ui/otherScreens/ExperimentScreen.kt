@@ -12,6 +12,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.layout.ContentScale
+import com.example.multilink.R
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,6 +59,20 @@ fun ExperimentScreen(onNavigateBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(32.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // --- FOR YOU EXPERIMENT ---
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "For You (3D Illustrations)",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+                ForYouExperimentSection()
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
             // --- LAYOUT 1 ---
             Column {
                 Text(
@@ -223,6 +241,64 @@ fun ExperimentCard(
                 )
             }
         }
+    }
+}
+
+@Composable
+fun ForYouExperimentSection() {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            ForYouExperimentIcon("Trips", R.drawable.trips_3d, imageSize = 48)
+            ForYouExperimentIcon("Family", R.drawable.family_3d, imageSize = 48)
+            ForYouExperimentIcon("Parcel", R.drawable.parcel_3d, imageSize = 40)
+            ForYouExperimentIcon("Vehicles", R.drawable.vehicles_3d, imageSize = 48)
+        }
+    }
+}
+
+@Composable
+fun ForYouExperimentIcon(title: String, imageRes: Int?, imageSize: Int = 48, isMore: Boolean = false) {
+    Column(
+        modifier = Modifier.width(76.dp).clickable { },
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .size(72.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center
+        ) {
+            if (isMore) {
+                Icon(
+                    imageVector = Icons.Default.Apps,
+                    contentDescription = title,
+                    tint = MaterialTheme.colorScheme.onBackground,
+                    modifier = Modifier.size(32.dp)
+                )
+            } else if (imageRes != null) {
+                Image(
+                    painter = painterResource(id = imageRes),
+                    contentDescription = title,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.size(imageSize.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onBackground,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 

@@ -1,55 +1,66 @@
 package com.example.multilink.ui.main
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PageSize
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.pager.PageSize
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.border
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
+import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.FlightTakeoff
+import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.Inventory
+import androidx.compose.material.icons.filled.LocalShipping
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalConfiguration
 import com.example.multilink.R
 
-data class ServiceItem(
-    val title: String,
-    val icon: ImageVector,
-    val badgeText: String? = null
-)
-
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ServicesScreen() {
     val scrollState = rememberScrollState()
-    val configuration = LocalConfiguration.current
-    val screenWidth = configuration.screenWidthDp.dp
-    val promoPageWidth = screenWidth * 0.9f
 
     Column(
         modifier = Modifier
@@ -59,202 +70,166 @@ fun ServicesScreen() {
             .padding(vertical = 24.dp)
             .windowInsetsPadding(WindowInsets.statusBars)
     ) {
-        // --- For You Section ---
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "For you",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onBackground,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            Icon(
-                imageVector = Icons.Default.ChevronRight,
-                contentDescription = "See more",
-                tint = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.size(20.dp)
-            )
-        }
-
+        ForYouSection()
         Spacer(modifier = Modifier.height(16.dp))
 
-        // 4x2 Grid removed and replaced by Tracking Cards below.
-
-
-        // --- Tracking Cards Section (Layout 1: Masonry) ---
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                TrackingCard(
-                    title = "Track your family",
-                    icon = Icons.Default.Groups,
-                    modifier = Modifier.weight(0.6f),
-                    height = 120
-                )
-                TrackingCard(
-                    title = "Track Your trips",
-                    icon = Icons.Default.FlightTakeoff,
-                    modifier = Modifier.weight(0.4f),
-                    height = 120
-                )
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                TrackingCard(
-                    title = "Track your Parcel",
-                    icon = Icons.Default.Inventory,
-                    modifier = Modifier.weight(0.4f),
-                    height = 100
-                )
-                TrackingCard(
-                    title = "Vehicles , trcuks , logistics",
-                    icon = Icons.Default.LocalShipping,
-                    modifier = Modifier.weight(0.6f),
-                    height = 100
-                )
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            TrackingCard(
-                title = "See all",
-                icon = Icons.Default.Apps,
-                modifier = Modifier.fillMaxWidth(),
-                height = 60,
-                horizontalLayout = true
-            )
-        }
-
+        TrackingCardsSection()
         Spacer(modifier = Modifier.height(32.dp))
 
-        // --- Elevate Your Ride ---
-        Text(
-            text = "Elevate your ride",
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onBackground,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(horizontal = 16.dp)
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        val elevatePagerState = rememberPagerState(pageCount = { 3 })
-        HorizontalPager(
-            state = elevatePagerState,
-            modifier = Modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = 16.dp),
-            pageSize = PageSize.Fixed(280.dp),
-            pageSpacing = 8.dp
-        ) { page ->
-            when (page) {
-                0 -> ElevateCard(
-                    title = "Request Uber XL",
-                    subtitle = "Spacious comfortable SUV rides",
-                    imageRes = R.drawable.uber_xl
-                )
-
-                1 -> ElevateCard(
-                    title = "Request Premier",
-                    subtitle = "Ride with top-rated drivers",
-                    imageRes = R.drawable.uber_premier
-                )
-
-                2 -> ElevateCard(
-                    title = "Uber Pet",
-                    subtitle = "Go with your pet",
-                    imageRes = R.drawable.uber_xl
-                )
-            }
-        }
-
+        ElevateYourRideSection()
         Spacer(modifier = Modifier.height(32.dp))
 
-        // --- Promos ---
-        val promoPagerState = rememberPagerState(pageCount = { 4 })
-        HorizontalPager(
-            state = promoPagerState,
-            modifier = Modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = 16.dp),
-            pageSize = PageSize.Fixed(promoPageWidth),
-            pageSpacing = 8.dp
-        ) { page ->
-            when (page) {
-                0 -> PromoCard("Enjoy 5% off XL", "Book now")
-                1 -> PromoCard("Get 10% off Moto", "Book now")
-                2 -> PromoCard("Rentals discount", "Book now")
-                3 -> PromoCard("Package delivery", "Book now")
-            }
-        }
-
+        PromoCardsSection()
         Spacer(modifier = Modifier.height(120.dp)) // padding for bottom bar
     }
 }
 
 @Composable
-fun ServiceIcon(item: ServiceItem, modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier.clickable { },
-        horizontalAlignment = Alignment.CenterHorizontally
+fun ForYouSection() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .size(64.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = item.icon,
-                contentDescription = item.title,
-                tint = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.size(28.dp)
-            )
+        Text(
+            text = "For you",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onBackground,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        Icon(
+            imageVector = Icons.Default.ChevronRight,
+            contentDescription = "See more",
+            tint = MaterialTheme.colorScheme.onBackground,
+            modifier = Modifier.size(20.dp)
+        )
+    }
+}
 
-            if (item.badgeText != null) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .offset(y = (-4).dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.error)
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                ) {
-                    Text(
-                        text = item.badgeText,
-                        color = Color.White,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
+@Composable
+fun TrackingCardsSection() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            TrackingCard(
+                title = "Track your family",
+                icon = Icons.Default.Groups,
+                modifier = Modifier.weight(0.6f),
+                height = 120
+            )
+            TrackingCard(
+                title = "Track Your trips",
+                icon = Icons.Default.FlightTakeoff,
+                modifier = Modifier.weight(0.4f),
+                height = 120
+            )
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-        Text(
-            text = item.title,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onBackground,
-            textAlign = TextAlign.Center,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            TrackingCard(
+                title = "Track your Parcel",
+                icon = Icons.Default.Inventory,
+                modifier = Modifier.weight(0.4f),
+                height = 100
+            )
+            TrackingCard(
+                title = "Vehicles , Trucks , logistics",
+                icon = Icons.Default.LocalShipping,
+                modifier = Modifier.weight(0.6f),
+                height = 100
+            )
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        TrackingCard(
+            title = "See all",
+            icon = Icons.Default.Apps,
+            modifier = Modifier.fillMaxWidth(),
+            height = 60,
+            horizontalLayout = true
         )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun ElevateYourRideSection() {
+    Text(
+        text = "Elevate your ride",
+        style = MaterialTheme.typography.titleMedium,
+        color = MaterialTheme.colorScheme.onBackground,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier.padding(horizontal = 16.dp)
+    )
+
+    Spacer(modifier = Modifier.height(16.dp))
+
+    val elevatePagerState = rememberPagerState(pageCount = { 3 })
+    HorizontalPager(
+        state = elevatePagerState,
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        pageSize = PageSize.Fixed(280.dp),
+        pageSpacing = 8.dp
+    ) { page ->
+        when (page) {
+            0 -> ElevateCard(
+                title = "Request Uber XL",
+                subtitle = "Spacious comfortable SUV rides",
+                imageRes = R.drawable.uber_xl
+            )
+
+            1 -> ElevateCard(
+                title = "Request Premier",
+                subtitle = "Ride with top-rated drivers",
+                imageRes = R.drawable.uber_premier
+            )
+
+            2 -> ElevateCard(
+                title = "Uber Pet",
+                subtitle = "Go with your pet",
+                imageRes = R.drawable.uber_xl
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun PromoCardsSection() {
+    val windowInfo = LocalWindowInfo.current
+    val density = LocalDensity.current
+    val screenWidth = with(density) { windowInfo.containerSize.width.toDp() }
+    val promoPageWidth = screenWidth * 0.9f
+
+    val promoPagerState = rememberPagerState(pageCount = { 4 })
+    HorizontalPager(
+        state = promoPagerState,
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        pageSize = PageSize.Fixed(promoPageWidth),
+        pageSpacing = 8.dp
+    ) { page ->
+        when (page) {
+            0 -> PromoCard("Enjoy 5% off XL", "Book now")
+            1 -> PromoCard("Get 10% off Moto", "Book now")
+            2 -> PromoCard("Rentals discount", "Book now")
+            3 -> PromoCard("Package delivery", "Book now")
+        }
     }
 }
 
@@ -270,7 +245,7 @@ fun ElevateCard(title: String, subtitle: String, imageRes: Int) {
             .background(bottomBgColor)
             .clickable { }
     ) {
-        androidx.compose.foundation.Image(
+        Image(
             painter = painterResource(id = imageRes),
             contentDescription = title,
             contentScale = ContentScale.Crop,

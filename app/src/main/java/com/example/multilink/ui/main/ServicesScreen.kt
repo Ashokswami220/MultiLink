@@ -32,10 +32,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.FlightTakeoff
-import androidx.compose.material.icons.filled.Groups
-import androidx.compose.material.icons.filled.Inventory
-import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -70,9 +66,6 @@ fun ServicesScreen() {
             .padding(vertical = 24.dp)
             .windowInsetsPadding(WindowInsets.statusBars)
     ) {
-        ForYouSection()
-        Spacer(modifier = Modifier.height(16.dp))
-
         TrackingCardsSection()
         Spacer(modifier = Modifier.height(32.dp))
 
@@ -85,30 +78,6 @@ fun ServicesScreen() {
 }
 
 @Composable
-fun ForYouSection() {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = "For you",
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onBackground,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(modifier = Modifier.width(4.dp))
-        Icon(
-            imageVector = Icons.Default.ChevronRight,
-            contentDescription = "See more",
-            tint = MaterialTheme.colorScheme.onBackground,
-            modifier = Modifier.size(20.dp)
-        )
-    }
-}
-
-@Composable
 fun TrackingCardsSection() {
     Column(
         modifier = Modifier
@@ -116,19 +85,40 @@ fun TrackingCardsSection() {
             .padding(horizontal = 16.dp)
     ) {
         Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(bottom = 12.dp)
+        ) {
+            Text(
+                text = "Track your",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Icon(
+                imageVector = Icons.Default.ChevronRight,
+                contentDescription = "See more",
+                tint = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+
+        Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             TrackingCard(
                 title = "Track your family",
-                icon = Icons.Default.Groups,
-                modifier = Modifier.weight(0.6f),
+                imageRes = R.drawable.family_3d,
+                imageSize = 60,
+                modifier = Modifier.weight(0.5f),
                 height = 120
             )
             TrackingCard(
                 title = "Track Your trips",
-                icon = Icons.Default.FlightTakeoff,
-                modifier = Modifier.weight(0.4f),
+                imageRes = R.drawable.trips_3d,
+                imageSize = 68,
+                modifier = Modifier.weight(0.5f),
                 height = 120
             )
         }
@@ -141,15 +131,18 @@ fun TrackingCardsSection() {
         ) {
             TrackingCard(
                 title = "Track your Parcel",
-                icon = Icons.Default.Inventory,
-                modifier = Modifier.weight(0.4f),
+                imageRes = R.drawable.parcel_3d,
+                imageSize = 54,
+                modifier = Modifier.weight(0.5f),
                 height = 100
             )
             TrackingCard(
-                title = "Vehicles , Trucks , logistics",
-                icon = Icons.Default.LocalShipping,
-                modifier = Modifier.weight(0.6f),
-                height = 100
+                title = "Vehicles & Trucks",
+                imageRes = R.drawable.vehicles_3d,
+                imageSize = 68,
+                modifier = Modifier.weight(0.5f),
+                height = 100,
+                topPadding = 0
             )
         }
 
@@ -274,11 +267,14 @@ fun ElevateCard(title: String, subtitle: String, imageRes: Int) {
 
 @Composable
 fun TrackingCard(
-    title: String,
-    icon: ImageVector,
     modifier: Modifier = Modifier,
+    title: String,
+    icon: ImageVector? = null,
+    imageRes: Int? = null,
+    imageSize: Int = 48,
     height: Int = 100,
-    horizontalLayout: Boolean = false
+    horizontalLayout: Boolean = false,
+    topPadding: Int = 12
 ) {
     Box(
         modifier = modifier
@@ -286,20 +282,29 @@ fun TrackingCard(
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .clickable { }
-            .padding(12.dp),
-        contentAlignment = Alignment.Center
+            .padding(start = 12.dp, end = 12.dp, bottom = 12.dp, top = topPadding.dp),
+        contentAlignment = if (horizontalLayout) Alignment.Center else Alignment.TopCenter
     ) {
         if (horizontalLayout) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
             ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = title,
-                    tint = MaterialTheme.colorScheme.onBackground,
-                    modifier = Modifier.size(24.dp)
-                )
+                if (imageRes != null) {
+                    Image(
+                        painter = painterResource(id = imageRes),
+                        contentDescription = title,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.size(24.dp)
+                    )
+                } else if (icon != null) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = title,
+                        tint = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = title,
@@ -312,13 +317,22 @@ fun TrackingCard(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = title,
-                    tint = MaterialTheme.colorScheme.onBackground,
-                    modifier = Modifier.size(32.dp)
-                )
-                Spacer(modifier = Modifier.height(8.dp))
+                if (imageRes != null) {
+                    Image(
+                        painter = painterResource(id = imageRes),
+                        contentDescription = title,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.size(imageSize.dp)
+                    )
+                } else if (icon != null) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = title,
+                        tint = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = title,
                     style = MaterialTheme.typography.labelMedium,

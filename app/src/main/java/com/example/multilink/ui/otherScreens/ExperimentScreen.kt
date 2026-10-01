@@ -1,32 +1,52 @@
 package com.example.multilink.ui.otherScreens
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.foundation.Image
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.layout.ContentScale
-import com.example.multilink.R
+import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.FlightTakeoff
+import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.Inventory
+import androidx.compose.material.icons.filled.LocalShipping
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import com.example.multilink.R
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -75,13 +95,24 @@ fun ExperimentScreen(onNavigateBack: () -> Unit) {
 
             // --- LAYOUT 1 ---
             Column {
-                Text(
-                    text = "Layout 1: Staggered / Masonry",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold,
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(bottom = 12.dp)
-                )
+                ) {
+                    Text(
+                        text = "Track your",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Icon(
+                        imageVector = Icons.Filled.ChevronRight,
+                        contentDescription = "See more",
+                        tint = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
                 Layout1()
             }
 
@@ -123,19 +154,34 @@ fun Layout1() {
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            ExperimentCard(title = "Track your family", icon = Icons.Default.Groups, modifier = Modifier.weight(0.6f), height = 120)
-            ExperimentCard(title = "Track Your trips", icon = Icons.Default.FlightTakeoff, modifier = Modifier.weight(0.4f), height = 120)
+            ExperimentCard(
+                title = "Family Circle", imageRes = R.drawable.family_3d, imageSize = 60,
+                modifier = Modifier.weight(0.5f), height = 120
+            )
+            ExperimentCard(
+                title = "Live Trips", imageRes = R.drawable.trips_3d, imageSize = 64,
+                modifier = Modifier.weight(0.5f), height = 120
+            )
         }
         Spacer(modifier = Modifier.height(12.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            ExperimentCard(title = "Track your Parcel", icon = Icons.Default.Inventory, modifier = Modifier.weight(0.4f), height = 100)
-            ExperimentCard(title = "Vehicles & Trucks", icon = Icons.Default.LocalShipping, modifier = Modifier.weight(0.6f), height = 100)
+            ExperimentCard(
+                title = "Parcels", imageRes = R.drawable.parcel_3d, imageSize = 50,
+                modifier = Modifier.weight(0.5f), height = 100
+            )
+            ExperimentCard(
+                title = "Vehicles & Trucks", imageRes = R.drawable.vehicles_3d, imageSize = 64,
+                modifier = Modifier.weight(0.5f), height = 100, topPadding = 2
+            )
         }
         Spacer(modifier = Modifier.height(12.dp))
-        ExperimentCard(title = "See all", icon = Icons.Default.Apps, modifier = Modifier.fillMaxWidth(), height = 60, horizontalLayout = true)
+        ExperimentCard(
+            title = "See all", icon = Icons.Default.Apps, modifier = Modifier.fillMaxWidth(),
+            height = 60, horizontalLayout = true
+        )
     }
 }
 
@@ -146,17 +192,32 @@ fun Layout2() {
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            ExperimentCard(title = "Family", icon = Icons.Default.Groups, modifier = Modifier.weight(1f), height = 100)
-            ExperimentCard(title = "Trips", icon = Icons.Default.FlightTakeoff, modifier = Modifier.weight(1f), height = 100)
-            ExperimentCard(title = "Parcel", icon = Icons.Default.Inventory, modifier = Modifier.weight(1f), height = 100)
+            ExperimentCard(
+                title = "Family", icon = Icons.Default.Groups, modifier = Modifier.weight(1f),
+                height = 100
+            )
+            ExperimentCard(
+                title = "Trips", icon = Icons.Default.FlightTakeoff, modifier = Modifier.weight(1f),
+                height = 100
+            )
+            ExperimentCard(
+                title = "Parcel", icon = Icons.Default.Inventory, modifier = Modifier.weight(1f),
+                height = 100
+            )
         }
         Spacer(modifier = Modifier.height(12.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            ExperimentCard(title = "Vehicles, Trucks, logistics", icon = Icons.Default.LocalShipping, modifier = Modifier.weight(0.66f), height = 100)
-            ExperimentCard(title = "See all", icon = Icons.Default.Apps, modifier = Modifier.weight(0.33f), height = 100)
+            ExperimentCard(
+                title = "Vehicles, Trucks, logistics", icon = Icons.Default.LocalShipping,
+                modifier = Modifier.weight(0.66f), height = 100
+            )
+            ExperimentCard(
+                title = "See all", icon = Icons.Default.Apps, modifier = Modifier.weight(0.33f),
+                height = 100
+            )
         }
     }
 }
@@ -164,33 +225,51 @@ fun Layout2() {
 @Composable
 fun Layout3() {
     Column(modifier = Modifier.fillMaxWidth()) {
-        ExperimentCard(title = "Track your family", icon = Icons.Default.Groups, modifier = Modifier.fillMaxWidth(), height = 140)
+        ExperimentCard(
+            title = "Track your family", icon = Icons.Default.Groups,
+            modifier = Modifier.fillMaxWidth(), height = 140
+        )
         Spacer(modifier = Modifier.height(12.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            ExperimentCard(title = "Track Your trips", icon = Icons.Default.FlightTakeoff, modifier = Modifier.weight(1f), height = 80)
-            ExperimentCard(title = "Track your Parcel", icon = Icons.Default.Inventory, modifier = Modifier.weight(1f), height = 80)
+            ExperimentCard(
+                title = "Track Your trips", icon = Icons.Default.FlightTakeoff,
+                modifier = Modifier.weight(1f), height = 80
+            )
+            ExperimentCard(
+                title = "Track your Parcel", icon = Icons.Default.Inventory,
+                modifier = Modifier.weight(1f), height = 80
+            )
         }
         Spacer(modifier = Modifier.height(12.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            ExperimentCard(title = "Vehicles & Trucks", icon = Icons.Default.LocalShipping, modifier = Modifier.weight(1f), height = 80)
-            ExperimentCard(title = "See all", icon = Icons.Default.Apps, modifier = Modifier.weight(1f), height = 80)
+            ExperimentCard(
+                title = "Vehicles & Trucks", icon = Icons.Default.LocalShipping,
+                modifier = Modifier.weight(1f), height = 80
+            )
+            ExperimentCard(
+                title = "See all", icon = Icons.Default.Apps, modifier = Modifier.weight(1f),
+                height = 80
+            )
         }
     }
 }
 
 @Composable
 fun ExperimentCard(
-    title: String, 
-    icon: ImageVector, 
-    modifier: Modifier = Modifier, 
+    modifier: Modifier = Modifier,
+    title: String,
+    icon: ImageVector? = null,
+    imageRes: Int? = null,
+    imageSize: Int = 48,
     height: Int,
-    horizontalLayout: Boolean = false
+    horizontalLayout: Boolean = false,
+    topPadding: Int = 12
 ) {
     Box(
         modifier = modifier
@@ -198,21 +277,30 @@ fun ExperimentCard(
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .clickable { }
-            .padding(12.dp),
-        contentAlignment = Alignment.Center
+            .padding(start = 12.dp, end = 12.dp, bottom = 12.dp, top = topPadding.dp),
+        contentAlignment = if (horizontalLayout) Alignment.Center else Alignment.TopCenter
     ) {
         if (horizontalLayout) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
             ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = title,
-                    tint = MaterialTheme.colorScheme.onBackground,
-                    modifier = Modifier.size(24.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
+                if (imageRes != null) {
+                    Image(
+                        painter = painterResource(id = imageRes),
+                        contentDescription = title,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.size(24.dp)
+                    )
+                } else if (icon != null) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = title,
+                        tint = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(4.dp))
                 Text(
                     text = title,
                     style = MaterialTheme.typography.labelMedium,
@@ -224,13 +312,22 @@ fun ExperimentCard(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = title,
-                    tint = MaterialTheme.colorScheme.onBackground,
-                    modifier = Modifier.size(32.dp)
-                )
-                Spacer(modifier = Modifier.height(8.dp))
+                if (imageRes != null) {
+                    Image(
+                        painter = painterResource(id = imageRes),
+                        contentDescription = title,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.size(imageSize.dp)
+                    )
+                } else if (icon != null) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = title,
+                        tint = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = title,
                     style = MaterialTheme.typography.labelMedium,
@@ -260,9 +357,13 @@ fun ForYouExperimentSection() {
 }
 
 @Composable
-fun ForYouExperimentIcon(title: String, imageRes: Int?, imageSize: Int = 48, isMore: Boolean = false) {
+fun ForYouExperimentIcon(
+    title: String, imageRes: Int?, imageSize: Int = 48, isMore: Boolean = false
+) {
     Column(
-        modifier = Modifier.width(76.dp).clickable { },
+        modifier = Modifier
+            .width(76.dp)
+            .clickable { },
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(

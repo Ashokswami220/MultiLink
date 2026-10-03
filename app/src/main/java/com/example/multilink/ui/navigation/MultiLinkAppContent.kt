@@ -35,6 +35,8 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.multilink.R
 import com.google.firebase.auth.FirebaseAuth
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeEffect
 
 data class MultiLinkNavItem(
     val dest: BottomNavDest,
@@ -133,12 +135,14 @@ val navItems
 fun MultiLinkNavigationBar(
     currentDestination: BottomNavDest,
     onDestinationSelected: (BottomNavDest) -> Unit,
+    hazeState: HazeState,
     modifier: Modifier = Modifier,
 ) {
     BottomNavigationBar(
         currentDestination = currentDestination,
         onDestinationSelected = onDestinationSelected,
         items = navItems,
+        hazeState = hazeState,
         modifier = modifier
     )
 }
@@ -148,6 +152,7 @@ private fun BottomNavigationBar(
     currentDestination: BottomNavDest,
     onDestinationSelected: (BottomNavDest) -> Unit,
     items: List<MultiLinkNavItem>,
+    hazeState: HazeState,
     modifier: Modifier = Modifier,
 ) {
     Box(
@@ -162,7 +167,10 @@ private fun BottomNavigationBar(
                 .fillMaxWidth(0.75f) // Made it even smaller in width
                 .height(60.dp) // Decreased slight height
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.background)
+                .hazeEffect(state = hazeState) {
+                    blurRadius = 20.dp
+                }
+                .background(Color.White.copy(alpha = 0.15f))
                 .border(
                     width = 1.5.dp,
                     color = if (androidx.compose.foundation.isSystemInDarkTheme()) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.outlineVariant,

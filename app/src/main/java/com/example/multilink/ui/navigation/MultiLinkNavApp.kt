@@ -103,7 +103,7 @@ import com.example.multilink.ui.viewmodel.MultiLinkViewModel
 import com.example.multilink.utils.NetworkMonitor
 import com.google.firebase.auth.FirebaseAuth
 import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.haze
+import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.launch
 
 const val ANIM_DURATION = 400
@@ -283,7 +283,7 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
                     startDestination = startDest,
                     modifier = Modifier
                         .weight(1f)
-                        .haze(hazeState)
+                        .hazeSource(state = hazeState)
                         .let {
                             if (!isOnline && shouldShowGlobalBanner) {
                                 it
@@ -588,7 +588,8 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
                                     ) {
                                         MultiLinkNavigationBar(
                                             currentDestination = visibleTab,
-                                            onDestinationSelected = onBottomTabSelected
+                                            onDestinationSelected = onBottomTabSelected,
+                                            hazeState = hazeState
                                         )
                                     }
                                 }

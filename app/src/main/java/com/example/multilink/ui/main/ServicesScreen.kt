@@ -25,10 +25,9 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PageSize
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.ChevronRight
@@ -40,9 +39,28 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.zIndex
+import kotlin.math.absoluteValue
+import kotlin.math.roundToInt
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Devices
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -56,28 +74,102 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.multilink.R
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ServicesScreen() {
-    val scrollState = rememberScrollState()
+    var titleHeightPx by remember { mutableFloatStateOf(0f) }
+    var searchBarHeightPx by remember { mutableFloatStateOf(0f) }
+    var headerOffsetPx by remember { mutableFloatStateOf(0f) }
 
-    Column(
+    val headerAlpha by remember {
+        derivedStateOf {
+            if (titleHeightPx == 0f) 1f
+            else (1f - (headerOffsetPx.absoluteValue / titleHeightPx).coerceIn(0f, 1f))
+        }
+    }
+
+    val nestedScrollConnection = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                val delta = available.y
+                val newOffset = headerOffsetPx + delta
+                headerOffsetPx = newOffset.coerceIn(-titleHeightPx, 0f)
+                return Offset.Zero
+            }
+        }
+    }
+
+    val density = LocalDensity.current
+    val totalHeaderHeightDp = remember(titleHeightPx, searchBarHeightPx, density) {
+        with(density) { (titleHeightPx + searchBarHeightPx).toDp() }
+    }
+
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .verticalScroll(scrollState)
-            .padding(vertical = 24.dp)
             .windowInsetsPadding(WindowInsets.statusBars)
+            .nestedScroll(nestedScrollConnection)
     ) {
-        JoinSessionSearchBar()
-        Spacer(modifier = Modifier.height(24.dp))
-        TrackingCardsSection()
-        Spacer(modifier = Modifier.height(32.dp))
+        // --- SCROLLABLE CONTENT ---
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                top = if (totalHeaderHeightDp > 0.dp) totalHeaderHeightDp + 12.dp else 120.dp,
+                bottom = 120.dp
+            )
+        ) {
+            item {
+                RecentSessionsSection()
+                Spacer(modifier = Modifier.height(24.dp))
+                TrackingCardsSection()
+                Spacer(modifier = Modifier.height(32.dp))
 
-        ElevateYourRideSection()
-        Spacer(modifier = Modifier.height(32.dp))
+                ElevateYourRideSection()
+                Spacer(modifier = Modifier.height(32.dp))
 
-        PromoCardsSection()
-        Spacer(modifier = Modifier.height(120.dp)) // padding for bottom bar
+                PromoCardsSection()
+            }
+        }
+
+        // --- COLLAPSING HEADER OVERLAY ---
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .offset { IntOffset(x = 0, y = headerOffsetPx.roundToInt()) }
+                .background(MaterialTheme.colorScheme.background)
+                .zIndex(1f)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer { alpha = headerAlpha }
+                    .onGloballyPositioned { coordinates ->
+                        titleHeightPx = coordinates.size.height.toFloat()
+                    }
+            ) {
+                Text(
+                    text = "MultiLink",
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    fontWeight = FontWeight.ExtraBold,
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp)
+                        .padding(top = 24.dp, bottom = 8.dp)
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onGloballyPositioned { coordinates ->
+                        searchBarHeightPx = coordinates.size.height.toFloat()
+                    }
+                    .padding(top = 8.dp)
+            ) {
+                JoinSessionSearchBar()
+            }
+        }
     }
 }
 
@@ -414,16 +506,18 @@ fun JoinSessionSearchBar(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
-            .height(56.dp)
+            .height(60.dp)
+            .shadow(elevation = 2.dp, shape = CircleShape)
             .clip(CircleShape)
             .background(bgColor)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
             .clickable { /* Handle click */ },
         contentAlignment = Alignment.CenterStart
     ) {
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(start = 16.dp, end = 8.dp),
+                .padding(start = 20.dp, end = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
@@ -468,5 +562,137 @@ fun JoinSessionSearchBar(
                 }
             }
         }
+    }
+}
+
+@Composable
+fun RecentSessionsSection() {
+    var showEmptyState by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+    ) {
+        if (!showEmptyState) {
+            // Sessions State
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Recent",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "See all",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable { showEmptyState = true }
+                )
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                RecentSessionCard(name = "Family trip", status = "Live")
+                RecentSessionCard(name = "Weekend rental", status = "Paused")
+            }
+        } else {
+            // Empty State
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(64.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.colorScheme.background)
+                    .border(
+                        1.5.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp)
+                    )
+                    .clickable { showEmptyState = false },
+                contentAlignment = Alignment.CenterStart
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = "No sessions",
+                        tint = MaterialTheme.colorScheme.onBackground
+                    )
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Text(
+                        text = "You have no sessions",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun RecentSessionCard(name: String, status: String) {
+    val isLive = status.equals("Live", ignoreCase = true)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(72.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.background)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
+            .clickable { }
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Left Icon
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.background),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.Devices,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+        Spacer(modifier = Modifier.width(16.dp))
+
+        // Middle Content (Name & Status)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = name,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = status,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (isLive) Color(
+                    0xFF048848
+                ) else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                fontWeight = FontWeight.Medium
+            )
+        }
+
+        // Right Chevron
+        Icon(
+            imageVector = Icons.Default.ChevronRight,
+            contentDescription = "Details",
+            tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
+        )
     }
 }

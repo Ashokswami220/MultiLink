@@ -1,4 +1,4 @@
-package com.example.multilink.ui.main
+package com.example.multilink.ui.settings
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background

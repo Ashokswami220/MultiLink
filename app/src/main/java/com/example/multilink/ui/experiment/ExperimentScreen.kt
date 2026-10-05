@@ -1,4 +1,4 @@
-package com.example.multilink.ui.otherScreens
+package com.example.multilink.ui.experiment
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background

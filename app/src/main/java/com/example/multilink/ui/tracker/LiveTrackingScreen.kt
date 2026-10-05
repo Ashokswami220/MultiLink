@@ -104,10 +104,10 @@ import com.example.multilink.ui.components.dialogs.ArrivedToggleDialog
 import com.example.multilink.ui.components.dialogs.DeleteSessionDialog
 import com.example.multilink.ui.components.dialogs.PauseSessionDialog
 import com.example.multilink.ui.components.dialogs.TooFarDialog
-import com.example.multilink.ui.viewmodel.ParticipantUiModel
-import com.example.multilink.ui.viewmodel.SessionUiEvent
-import com.example.multilink.ui.viewmodel.SessionViewModel
-import com.example.multilink.ui.viewmodel.SessionViewModelFactory
+import com.example.multilink.ui.session.ParticipantUiModel
+import com.example.multilink.ui.session.SessionUiEvent
+import com.example.multilink.ui.session.SessionViewModel
+import com.example.multilink.ui.session.SessionViewModelFactory
 import com.example.multilink.utils.LocationUtils
 import com.mapbox.geojson.Point
 import com.mapbox.maps.CameraOptions

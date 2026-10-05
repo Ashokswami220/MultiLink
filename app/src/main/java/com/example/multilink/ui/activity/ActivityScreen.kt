@@ -1,4 +1,4 @@
-package com.example.multilink.ui.main
+package com.example.multilink.ui.activity
 
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
@@ -56,7 +56,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.multilink.model.ActivityFeedItem
-import com.example.multilink.ui.viewmodel.ActivityViewModel
+import com.example.multilink.ui.activity.ActivityViewModel
 import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.absoluteValue

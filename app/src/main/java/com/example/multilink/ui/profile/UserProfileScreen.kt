@@ -1,4 +1,4 @@
-package com.example.multilink.ui.otherScreens
+package com.example.multilink.ui.profile
 
 import android.content.Context
 import android.content.Intent

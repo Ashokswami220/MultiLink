@@ -1,4 +1,4 @@
-package com.example.multilink.ui.otherScreens
+package com.example.multilink.ui.recent
 
 import android.content.Context
 import android.content.Intent
@@ -34,8 +34,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.multilink.ui.viewmodel.SessionViewModel
-import com.example.multilink.ui.viewmodel.SessionViewModelFactory
+import com.example.multilink.ui.session.SessionViewModel
+import com.example.multilink.ui.session.SessionViewModelFactory
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)

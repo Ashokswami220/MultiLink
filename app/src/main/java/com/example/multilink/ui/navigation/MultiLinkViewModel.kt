@@ -1,4 +1,4 @@
-package com.example.multilink.ui.viewmodel
+package com.example.multilink.ui.navigation
 
 import android.app.Application
 import android.util.Log

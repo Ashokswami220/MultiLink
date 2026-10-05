@@ -1,4 +1,4 @@
-package com.example.multilink.ui.viewmodel
+package com.example.multilink.ui.session
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider

@@ -60,8 +60,8 @@ import com.example.multilink.ui.components.MultiLinkMap
 import com.example.multilink.ui.components.MyLocationFab
 import com.example.multilink.ui.components.SessionControlBar
 import com.example.multilink.ui.components.SessionMapContent
-import com.example.multilink.ui.viewmodel.SessionViewModel
-import com.example.multilink.ui.viewmodel.SessionViewModelFactory
+import com.example.multilink.ui.session.SessionViewModel
+import com.example.multilink.ui.session.SessionViewModelFactory
 import com.example.multilink.utils.HapticHelper
 import com.example.multilink.utils.LocationUtils.calculateDistance
 import com.google.android.gms.location.LocationServices

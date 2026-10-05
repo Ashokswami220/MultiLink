@@ -1,4 +1,4 @@
-package com.example.multilink.ui.main
+package com.example.multilink.ui.recent
 
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
@@ -38,8 +38,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.multilink.R
 import com.example.multilink.model.RecentSession
-import com.example.multilink.ui.viewmodel.SessionViewModel
-import com.example.multilink.ui.viewmodel.SessionViewModelFactory
+import com.example.multilink.ui.session.SessionViewModel
+import com.example.multilink.ui.session.SessionViewModelFactory
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat

@@ -105,8 +105,8 @@ import com.example.multilink.model.SessionParticipant
 import com.example.multilink.service.LocationService
 import com.example.multilink.ui.components.dialogs.DeleteSessionDialog
 import com.example.multilink.ui.components.dialogs.PauseSessionDialog
-import com.example.multilink.ui.viewmodel.SessionViewModel
-import com.example.multilink.ui.viewmodel.SessionViewModelFactory
+import com.example.multilink.ui.session.SessionViewModel
+import com.example.multilink.ui.session.SessionViewModelFactory
 import com.example.multilink.utils.LocationUtils
 import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.animation.expandHorizontally
@@ -117,7 +117,7 @@ import androidx.compose.material.icons.filled.TaskAlt
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import com.example.multilink.ui.viewmodel.SessionUiEvent
+import com.example.multilink.ui.session.SessionUiEvent
 import com.example.multilink.utils.HapticHelper
 import kotlinx.coroutines.delay
 import androidx.core.net.toUri

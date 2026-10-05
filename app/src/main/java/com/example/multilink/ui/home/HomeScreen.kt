@@ -1,4 +1,4 @@
-package com.example.multilink.ui.main
+package com.example.multilink.ui.home
 
 import com.example.multilink.ui.components.home.EmptySessionState
 import com.example.multilink.ui.components.home.HomeBanner
@@ -40,8 +40,8 @@ import com.example.multilink.ui.components.dialogs.CreateSessionDialog
 import com.example.multilink.ui.components.dialogs.UnifiedJoinDialog
 import com.example.multilink.ui.components.session.SessionCard
 import com.example.multilink.ui.components.session.SkeletonSessionCard
-import com.example.multilink.ui.navigation.MultiLinkTopBar
-import com.example.multilink.ui.navigation.rememberSingleClick
+import com.example.multilink.ui.components.MultiLinkTopBar
+import com.example.multilink.utils.rememberSingleClick
 import com.example.multilink.utils.NetworkMonitor
 import kotlinx.coroutines.launch
 import androidx.compose.animation.animateContentSize
@@ -65,8 +65,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.multilink.ui.components.dialogs.ArrivedToggleDialog
 import com.example.multilink.ui.components.dialogs.TooFarDialog
-import com.example.multilink.ui.viewmodel.HomeUiEvent
-import com.example.multilink.ui.viewmodel.HomeViewModel
+import com.example.multilink.ui.home.HomeUiEvent
+import com.example.multilink.ui.home.HomeViewModel
 import com.example.multilink.utils.HapticHelper
 import kotlinx.coroutines.flow.collectLatest
 

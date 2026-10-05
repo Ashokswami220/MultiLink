@@ -40,8 +40,8 @@ import com.example.multilink.repo.RouteResult
 import com.example.multilink.service.LocationService
 import com.example.multilink.ui.components.MultiLinkMap
 import com.example.multilink.ui.components.SessionMapContent
-import com.example.multilink.ui.viewmodel.SessionViewModel
-import com.example.multilink.ui.viewmodel.SessionViewModelFactory
+import com.example.multilink.ui.session.SessionViewModel
+import com.example.multilink.ui.session.SessionViewModelFactory
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.mapbox.geojson.Point
@@ -53,7 +53,7 @@ import kotlin.math.*
 import androidx.core.net.toUri
 import com.example.multilink.ui.components.dialogs.ArrivedToggleDialog
 import com.example.multilink.ui.components.dialogs.TooFarDialog
-import com.example.multilink.ui.viewmodel.SessionUiEvent
+import com.example.multilink.ui.session.SessionUiEvent
 import kotlinx.coroutines.flow.collectLatest
 
 object NavigationCache {

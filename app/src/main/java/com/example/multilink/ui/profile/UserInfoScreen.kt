@@ -1,4 +1,4 @@
-package com.example.multilink.ui.otherScreens
+package com.example.multilink.ui.profile
 
 import android.content.Intent
 import android.widget.Toast
@@ -33,8 +33,8 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.multilink.repo.RealtimeRepository
 import com.example.multilink.ui.tracker.openWhatsApp
-import com.example.multilink.ui.viewmodel.SessionViewModel
-import com.example.multilink.ui.viewmodel.SessionViewModelFactory
+import com.example.multilink.ui.session.SessionViewModel
+import com.example.multilink.ui.session.SessionViewModelFactory
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date

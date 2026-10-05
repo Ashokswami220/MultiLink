@@ -67,7 +67,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.multilink.R
-import com.example.multilink.ui.viewmodel.LocationSearchViewModel
+import com.example.multilink.ui.components.location.LocationSearchViewModel
 import com.google.android.gms.location.LocationServices
 import com.mapbox.bindgen.Value
 import com.mapbox.geojson.Feature

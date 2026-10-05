@@ -1,4 +1,4 @@
-package com.example.multilink.ui.viewmodel
+package com.example.multilink.ui.activity
 
 import android.util.Log
 import androidx.lifecycle.ViewModel

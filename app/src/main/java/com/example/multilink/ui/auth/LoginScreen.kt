@@ -27,7 +27,7 @@ import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.multilink.R
 import com.example.multilink.ui.theme.MultiLinkTheme
-import com.example.multilink.ui.viewmodel.MultiLinkViewModel
+import com.example.multilink.ui.navigation.MultiLinkViewModel
 import kotlinx.coroutines.launch
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption

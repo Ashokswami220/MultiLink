@@ -1,4 +1,4 @@
-package com.example.multilink.ui.otherScreens
+package com.example.multilink.ui.session
 
 import android.widget.Toast
 import androidx.compose.foundation.background
@@ -30,7 +30,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.multilink.repo.RealtimeRepository
-import com.example.multilink.ui.viewmodel.ActivityViewModel
+import com.example.multilink.ui.activity.ActivityViewModel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat

@@ -1,4 +1,4 @@
-package com.example.multilink.ui.viewmodel
+package com.example.multilink.ui.home
 
 import android.location.Location
 import androidx.lifecycle.ViewModel

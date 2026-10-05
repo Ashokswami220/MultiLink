@@ -53,8 +53,8 @@ import com.example.multilink.ui.components.MultiLinkMap
 import com.example.multilink.ui.components.MyLocationFab
 import com.example.multilink.ui.components.SessionControlBar
 import com.example.multilink.ui.components.SessionMapContent
-import com.example.multilink.ui.viewmodel.SessionViewModel
-import com.example.multilink.ui.viewmodel.SessionViewModelFactory
+import com.example.multilink.ui.session.SessionViewModel
+import com.example.multilink.ui.session.SessionViewModelFactory
 import com.example.multilink.utils.LocationUtils.calculateDistance
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
@@ -68,7 +68,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.multilink.ui.components.dialogs.ArrivedToggleDialog
-import com.example.multilink.ui.viewmodel.SessionUiEvent
+import com.example.multilink.ui.session.SessionUiEvent
 import com.example.multilink.utils.HapticHelper
 import kotlinx.coroutines.flow.collectLatest
 import kotlin.time.Duration.Companion.milliseconds

@@ -76,6 +76,9 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.multilink.R
+import com.example.multilink.ui.components.MultiLinkNavigationBar
+import com.example.multilink.ui.components.MultiLinkNavigationRail
+import com.example.multilink.ui.components.MultiLinkTopBar
 import com.example.multilink.repo.AuthRepository
 import com.example.multilink.repo.RealtimeRepository
 import com.example.multilink.service.LocationService
@@ -83,23 +86,23 @@ import com.example.multilink.ui.auth.InfoInputScreen
 import com.example.multilink.ui.auth.LoginScreen
 import com.example.multilink.ui.components.GlobalTrackingBlocker
 import com.example.multilink.ui.components.NoInternetBanner
-import com.example.multilink.ui.main.ActivityScreen
-import com.example.multilink.ui.main.HomeScreen
-import com.example.multilink.ui.main.RecentScreen
-import com.example.multilink.ui.main.ServicesScreen
-import com.example.multilink.ui.main.SettingsScreen
-import com.example.multilink.ui.otherScreens.ExperimentScreen
-import com.example.multilink.ui.otherScreens.NotificationDetailScreen
-import com.example.multilink.ui.otherScreens.RecentSessionDetailScreen
-import com.example.multilink.ui.otherScreens.SessionInfoScreen
-import com.example.multilink.ui.otherScreens.UserProfileScreen
+import com.example.multilink.ui.activity.ActivityScreen
+import com.example.multilink.ui.home.HomeScreen
+import com.example.multilink.ui.recent.RecentScreen
+import com.example.multilink.ui.services.ServicesScreen
+import com.example.multilink.ui.settings.SettingsScreen
+import com.example.multilink.ui.experiment.ExperimentScreen
+import com.example.multilink.ui.session.NotificationDetailScreen
+import com.example.multilink.ui.recent.RecentSessionDetailScreen
+import com.example.multilink.ui.session.SessionInfoScreen
+import com.example.multilink.ui.profile.UserProfileScreen
 import com.example.multilink.ui.tracker.DetailScreen
 import com.example.multilink.ui.tracker.LiveTrackingScreen
 import com.example.multilink.ui.tracker.ParentalTrackingScreen
 import com.example.multilink.ui.tracker.SeeAllScreen
 import com.example.multilink.ui.tracker.SoloNavigationScreen
-import com.example.multilink.ui.viewmodel.ActivityViewModel
-import com.example.multilink.ui.viewmodel.MultiLinkViewModel
+import com.example.multilink.ui.activity.ActivityViewModel
+import com.example.multilink.ui.navigation.MultiLinkViewModel
 import com.example.multilink.utils.NetworkMonitor
 import com.google.firebase.auth.FirebaseAuth
 import dev.chrisbanes.haze.HazeState
@@ -126,46 +129,26 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
     val networkMonitor = remember { NetworkMonitor(context) }
     val isOnline by networkMonitor.isOnline.collectAsState(initial = true)
 
-    val authRepository = remember { AuthRepository() }
+    val authViewModel: com.example.multilink.ui.auth.AuthViewModel = viewModel()
+    val authState by authViewModel.authState.collectAsState()
+
     val realtimeRepository = remember { RealtimeRepository() }
 
-    val auth = remember { FirebaseAuth.getInstance() }
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
 
-    var isCheckingAuth by rememberSaveable { mutableStateOf(true) }
-    var startDest by rememberSaveable { mutableStateOf(MultiLinkRoutes.LOGIN) }
+    val startDest = remember(authState) {
+        when (authState) {
+            is com.example.multilink.ui.auth.AuthState.Authenticated -> MultiLinkRoutes.HOME
+            is com.example.multilink.ui.auth.AuthState.NeedsProfile -> MultiLinkRoutes.COMPLETE_PROFILE
+            else -> MultiLinkRoutes.LOGIN
+        }
+    }
+    
     var currentTab by rememberSaveable { mutableIntStateOf(0) }
 
 
-    LaunchedEffect(Unit) {
-        if (isCheckingAuth) {
-            val currentUser = auth.currentUser
-            if (currentUser != null) {
-                val hasProfile = authRepository.checkUserExists()
-                startDest =
-                    if (hasProfile) MultiLinkRoutes.HOME else MultiLinkRoutes.COMPLETE_PROFILE
-            } else {
-                startDest = MultiLinkRoutes.LOGIN
-            }
-            isCheckingAuth = false
-        }
-    }
 
-    fun checkProfileAndNavigate() {
-        scope.launch {
-            val exists = authRepository.checkUserExists()
-            if (exists) {
-                navController.navigate(MultiLinkRoutes.HOME) {
-                    popUpTo(0) { inclusive = true }
-                }
-            } else {
-                navController.navigate(MultiLinkRoutes.COMPLETE_PROFILE) {
-                    popUpTo(0) { inclusive = true }
-                }
-            }
-        }
-    }
 
     // --- CENTRAL ACTIONS ---
 
@@ -241,7 +224,7 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
         }
     }
 
-    if (isCheckingAuth) {
+    if (authState is com.example.multilink.ui.auth.AuthState.Loading) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -952,7 +935,7 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
                     ) { entry ->
                         val sessionId = entry.arguments?.getString("sessionId") ?: ""
                         val userId = entry.arguments?.getString("userId") ?: ""
-                        com.example.multilink.ui.otherScreens.UserInfoScreen(
+                        com.example.multilink.ui.profile.UserInfoScreen(
                             sessionId = sessionId,
                             userId = userId,
                             onBackClick = { navController.popBackStack() }
@@ -996,35 +979,9 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
                             UserProfileScreen(
                                 onBackClick = { navController.popBackStack() },
                                 onLogout = {
-                                    scope.launch {
-                                        try {
-                                            // 1. KILL THE SERVICE
-                                            val stopIntent =
-                                                Intent(context, LocationService::class.java)
-                                            stopIntent.action = LocationService.ACTION_STOP
-                                            context.startService(stopIntent)
-
-                                            // 2. Sign out of Firebase
-                                            FirebaseAuth.getInstance()
-                                                .signOut()
-
-                                            // 3. Sign out of Google using Credential Manager API
-                                            val credentialManager =
-                                                CredentialManager.create(context)
-                                            credentialManager.clearCredentialState(
-                                                ClearCredentialStateRequest()
-                                            )
-
-                                            // 4. Safely navigate back on the UI thread using graph.id
-                                            navController.navigate(MultiLinkRoutes.LOGIN) {
-                                                popUpTo(navController.graph.id) { inclusive = true }
-                                            }
-                                        } catch (e: Exception) {
-                                            e.printStackTrace()
-                                            // Fallback navigation just in case Credential Manager fails
-                                            navController.navigate(MultiLinkRoutes.LOGIN) {
-                                                popUpTo(navController.graph.id) { inclusive = true }
-                                            }
+                                    authViewModel.logout(context) {
+                                        navController.navigate(MultiLinkRoutes.LOGIN) {
+                                            popUpTo(navController.graph.id) { inclusive = true }
                                         }
                                     }
                                 }
@@ -1164,10 +1121,8 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
                     ) {
                         InfoInputScreen(
                             onInfoSubmitted = {
-                                // Info Saved -> Now Go Home
-                                navController.navigate(MultiLinkRoutes.HOME) {
-                                    popUpTo(0) { inclusive = true }
-                                }
+                                // Info Saved -> Update Auth status
+                                authViewModel.checkAuthStatus()
                             }
                         )
                     }
@@ -1223,7 +1178,7 @@ fun MultiLinkNavApp(startJoinCode: String? = null) {
 
                         LoginScreen(
                             onLoginSuccess = {
-                                checkProfileAndNavigate()
+                                authViewModel.checkAuthStatus()
                             }
                         )
                     }
